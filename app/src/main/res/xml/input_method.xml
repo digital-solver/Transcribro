@@ -1,7 +1,7 @@
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
     android:settingsActivity="dev.soupslurpr.transcribro.MainActivity">
     <subtype
-        android:imeSubtypeMode="voice"
-        android:isAuxiliary="true"
+        android:imeSubtypeMode="keyboard"
+        android:isAuxiliary="false"
         android:languageTag="en-US" />
 </input-method>

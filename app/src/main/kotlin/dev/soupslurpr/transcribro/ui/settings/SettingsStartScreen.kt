@@ -28,6 +28,23 @@ import dev.soupslurpr.transcribro.R
 import dev.soupslurpr.transcribro.dataStore
 import dev.soupslurpr.transcribro.preferences.PreferencesViewModel
 import dev.soupslurpr.transcribro.ui.reusablecomposables.ScreenLazyColumn
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.soupslurpr.transcribro.recognitionservice.Languages
 
 @Composable
 fun SettingsStartScreen(
@@ -129,6 +146,70 @@ fun SettingsStartScreen(
         }
         item {
             SettingsCategory(
+                stringResource(R.string.speech_recognition_setting_category)
+            )
+        }
+        item {
+            val preference = preferencesUiState.useOnlineAsr
+            SettingsSwitchItem(
+                name = stringResource(id = R.string.use_online_asr_setting_name),
+                description = stringResource(id = R.string.use_online_asr_setting_description),
+                checked = preference.second.value,
+                onCheckedChange = {
+                    preferencesViewModel.setPreference(preference.first, it)
+                }
+            )
+        }
+        item {
+            val preference = preferencesUiState.groqApiKey
+            SettingsTextFieldItem(
+                name = stringResource(id = R.string.groq_api_key_setting_name),
+                description = stringResource(id = R.string.groq_api_key_setting_description),
+                value = preference.second.value,
+                onValueChange = {
+                    preference.second.value = it
+                    preferencesViewModel.setPreference(preference.first, it)
+                },
+                isSecret = true,
+            )
+        }
+        item {
+            SettingsInputLanguageItem(
+                currentCode = preferencesUiState.inputLanguage.second.value,
+                onPick = { code ->
+                    preferencesUiState.inputLanguage.second.value = code
+                    preferencesViewModel.setPreference(
+                        preferencesUiState.inputLanguage.first, code
+                    )
+                }
+            )
+        }
+        item {
+            val preference = preferencesUiState.geminiApiKey
+            SettingsTextFieldItem(
+                name = stringResource(id = R.string.gemini_api_key_setting_name),
+                description = stringResource(id = R.string.gemini_api_key_setting_description),
+                value = preference.second.value,
+                onValueChange = {
+                    preference.second.value = it
+                    preferencesViewModel.setPreference(preference.first, it)
+                },
+                isSecret = true,
+            )
+        }
+        item {
+            SettingsTranslationLanguageItem(
+                currentCode = preferencesUiState.targetLanguage.second.value,
+                onPick = { code ->
+                    preferencesUiState.targetLanguage.second.value = code
+                    preferencesViewModel.setPreference(
+                        preferencesUiState.targetLanguage.first, code
+                    )
+                }
+            )
+        }
+        item {
+            SettingsCategory(
                 stringResource(R.string.about_setting_category)
             )
         }
@@ -213,6 +294,159 @@ fun SettingsSwitchItem(
                 checked = checked,
                 onCheckedChange = null
             )
+        }
+    )
+}
+
+@Composable
+fun SettingsTextFieldItem(
+    name: String,
+    description: String? = null,
+    value: String,
+    onValueChange: (String) -> Unit,
+    isSecret: Boolean = false,
+) {
+    ListItem(
+        headlineContent = {
+            Text(name, fontWeight = FontWeight.SemiBold)
+        },
+        supportingContent = {
+            Column {
+                if (description != null) {
+                    Text(description)
+                }
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    visualTransformation = if (isSecret && value.isNotEmpty()) {
+                        PasswordVisualTransformation()
+                    } else {
+                        VisualTransformation.None
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                )
+            }
+        }
+    )
+}
+
+@Composable
+fun SettingsTranslationLanguageItem(
+    currentCode: String,
+    onPick: (String) -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    val current = Languages.byCode(currentCode)
+    val currentLabel = current?.let { "${it.englishName} (${it.nativeName})" } ?: currentCode
+
+    SettingsIconItem(
+        name = stringResource(R.string.translation_language_setting_name),
+        description = stringResource(R.string.translation_language_setting_description, currentLabel),
+        icon = Icons.Filled.Translate,
+        onClick = { showDialog = true }
+    )
+
+    if (showDialog) {
+        LanguagePickerDialog(
+            currentCode = currentCode,
+            onPick = {
+                onPick(it)
+                showDialog = false
+            },
+            onDismiss = { showDialog = false }
+        )
+    }
+}
+
+@Composable
+fun SettingsInputLanguageItem(
+    currentCode: String,
+    onPick: (String) -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    val current = Languages.byCode(currentCode)
+    val currentLabel = current?.let { "${it.englishName} (${it.nativeName})" } ?: currentCode
+
+    SettingsIconItem(
+        name = stringResource(R.string.input_language_setting_name),
+        description = stringResource(R.string.input_language_setting_description, currentLabel),
+        icon = Icons.Filled.RecordVoiceOver,
+        onClick = { showDialog = true }
+    )
+
+    if (showDialog) {
+        LanguagePickerDialog(
+            currentCode = currentCode,
+            languages = Languages.inputAll,
+            title = stringResource(R.string.input_language_dialog_title),
+            onPick = {
+                onPick(it)
+                showDialog = false
+            },
+            onDismiss = { showDialog = false }
+        )
+    }
+}
+
+@Composable
+fun LanguagePickerDialog(
+    currentCode: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+    languages: List<Languages.Language> = Languages.all,
+    title: String = stringResource(R.string.translation_language_dialog_title),
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(query) {
+        if (query.isBlank()) {
+            languages
+        } else {
+            languages.filter {
+                it.englishName.contains(query, ignoreCase = true) ||
+                    it.nativeName.contains(query, ignoreCase = true) ||
+                    it.code.contains(query, ignoreCase = true)
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.translation_language_search_hint)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .heightIn(max = 360.dp)
+                        .padding(top = 8.dp)
+                ) {
+                    items(filtered, key = { it.code }) { lang ->
+                        ListItem(
+                            modifier = Modifier.clickable { onPick(lang.code) },
+                            headlineContent = { Text(lang.englishName) },
+                            supportingContent = { Text(lang.nativeName) },
+                            trailingContent = if (lang.code == currentCode) {
+                                { Icon(Icons.Filled.Check, contentDescription = "selected") }
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
         }
     )
 }

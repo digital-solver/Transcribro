@@ -12,7 +12,6 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.whispercpp.whisper.WhisperContext
 import dev.soupslurpr.transcribro.recognitionservice.silerovad.SileroVadApi
@@ -22,6 +21,12 @@ import dev.soupslurpr.transcribro.recognitionservice.silerovad.SileroVadReposito
 import dev.soupslurpr.transcribro.recognitionservice.whisper.WhisperApi
 import dev.soupslurpr.transcribro.recognitionservice.whisper.WhisperLocalDataSource
 import dev.soupslurpr.transcribro.recognitionservice.whisper.WhisperRepository
+import dev.soupslurpr.transcribro.dataStore
+import dev.soupslurpr.transcribro.model.ModelDownloader
+import dev.soupslurpr.transcribro.preferences.PreferencesUiState
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,6 +46,11 @@ private data class Transcription(
 class MainRecognitionService : RecognitionService() {
     companion object {
         const val EXTRA_AUTO_STOP = "dev.soupslurpr.transcribro.EXTRA_AUTO_STOP"
+
+        // Cap one segment's audio so the buffer can't grow unbounded if VAD never fires an "end"
+        // (continuous speech or pure silence) — otherwise the list grows until OutOfMemoryError.
+        // 16 kHz * 180 s ≈ 5.8 MB.
+        private const val MAX_SEGMENT_SAMPLES = 16000 * 180
     }
 
     private val recordAndTranscribeScope = CoroutineScope(Dispatchers.IO)
@@ -51,13 +61,24 @@ class MainRecognitionService : RecognitionService() {
 
     private var recordAndTranscribeJob: Job? = null
 
-//    private var loadedModel: WhichModel? = null
+    // Cross-thread flags: set from the record/VAD coroutines and the binder thread
+    // (onStopListening), read from the record loop — @Volatile for visibility.
+    @Volatile
+    private var isSpeaking = false
 
-    private var isSpeaking by mutableStateOf(false)
+    @Volatile
+    private var stopListening = false
 
-    private var stopListening by mutableStateOf(false)
+    // Added to + iterated across coroutines. A plain list throws ConcurrentModificationException,
+    // which kills the transcribe coroutine and drops every segment after the first — use a
+    // copy-on-write list so concurrent iteration is safe.
+    private val transcribeJobs = java.util.concurrent.CopyOnWriteArrayList<Job>()
 
-    private val transcribeJobs = mutableListOf<Job>()
+    // ASR routing config, read from DataStore when recognition starts.
+    private var groqApiKey: String = ""
+    private var useOnlineAsr: Boolean = true
+    // Spoken language for the online (Groq) path; the on-device model is English-only.
+    private var inputLanguage: String = "en"
 
     private val whisperRepository: WhisperRepository =
         WhisperRepository(
@@ -65,9 +86,10 @@ class MainRecognitionService : RecognitionService() {
                 whisperApi =
                 object : WhisperApi {
                     override fun getWhisperContext(): WhisperContext {
-                        return WhisperContext.createContextFromAsset(
-                            application.assets,
-                            "models/whisper/ggml-model-whisper-tiny.en-q8_0.bin"
+                        // On-device model is downloaded to internal storage (ModelDownloader / first-run
+                        // download card), not bundled in the APK.
+                        return WhisperContext.createContextFromFile(
+                            ModelDownloader.modelFile(application).absolutePath
                         )
                     }
                 },
@@ -82,7 +104,9 @@ class MainRecognitionService : RecognitionService() {
                     val SAMPLE_RATE = 16000
                     val START_THRESHOLD = 0.6f
                     val END_THRESHOLD = 0.45f
-                    val MIN_SILENCE_DURATION_MS = 3000
+                    // How long a pause ends a segment + triggers transcription. 3 s felt laggy;
+                    // 1.2 s makes dictation noticeably snappier while still tolerating brief pauses.
+                    val MIN_SILENCE_DURATION_MS = 1200
                     val SPEECH_PAD_MS = 0
 
                     val model =
@@ -155,85 +179,6 @@ class MainRecognitionService : RecognitionService() {
         }
 
 
-//        val model = when (recognizerIntent?.extras?.getString(RecognizerIntent.EXTRA_LANGUAGE_MODEL)) {
-//            "TINY_EN_Q8_0" -> WhichModel.TINY_EN_Q8_0
-//            "TINY_EN_Q4_0" -> WhichModel.TINY_EN_Q4_0
-//            "BASE_Q8_0" -> WhichModel.BASE_Q8_0
-//            "BASE_Q4_0" -> WhichModel.BASE_Q4_0
-//
-//            // These k-quants are currently very slow and inaccurate
-//            "BASE_Q4K" -> WhichModel.BASE_Q4K
-//            "BASE_Q2K" -> WhichModel.BASE_Q2K
-//            else -> WhichModel.TINY_EN_Q4_0
-//        }
-//
-//        val isMultilingual = when (model) {
-//            WhichModel.TINY_EN_Q8_0 -> false
-//            WhichModel.TINY_EN_Q4_0 -> false
-//            WhichModel.BASE_Q8_0 -> true
-//            WhichModel.BASE_Q4_0 -> true
-//            WhichModel.BASE_Q4K -> true
-//            WhichModel.BASE_Q2K -> true
-//        }
-//
-//        println(model)
-//
-//        if (!isWhisperLoaded() || loadedModel != model) {
-//            val modelResId = when (model) {
-//                WhichModel.TINY_EN_Q8_0 -> R.raw.whisper_tiny_en_q8_0_model
-//                WhichModel.TINY_EN_Q4_0 -> R.raw.whisper_tiny_en_q4_0_model
-//                WhichModel.BASE_Q8_0 -> R.raw.whisper_base_q8_0_model
-//                WhichModel.BASE_Q4_0 -> R.raw.whisper_base_q4_0_model
-//                WhichModel.BASE_Q4K -> R.raw.whisper_base_q2k_model
-//                WhichModel.BASE_Q2K -> R.raw.whisper_base_q2k_model
-//            }
-//            val configResId = when (model) {
-//                WhichModel.TINY_EN_Q8_0 -> R.raw.whisper_tiny_en_config
-//                WhichModel.TINY_EN_Q4_0 -> R.raw.whisper_tiny_en_config
-//                WhichModel.BASE_Q8_0 -> R.raw.whisper_base_config
-//                WhichModel.BASE_Q4_0 -> R.raw.whisper_base_config
-//                WhichModel.BASE_Q4K -> R.raw.whisper_base_config
-//                WhichModel.BASE_Q2K -> R.raw.whisper_base_config
-//            }
-//            val tokenizerResId = when (model) {
-//                WhichModel.TINY_EN_Q8_0 -> R.raw.whisper_tiny_en_tokenizer
-//                WhichModel.TINY_EN_Q4_0 -> R.raw.whisper_tiny_en_tokenizer
-//                WhichModel.BASE_Q8_0 -> R.raw.whisper_base_tokenizer
-//                WhichModel.BASE_Q4_0 -> R.raw.whisper_base_tokenizer
-//                WhichModel.BASE_Q4K -> R.raw.whisper_base_tokenizer
-//                WhichModel.BASE_Q2K -> R.raw.whisper_base_tokenizer
-//            }
-//
-//            println(recognizerIntent?.extras?.getString(RecognizerIntent.EXTRA_LANGUAGE_MODEL))
-//
-//            val modelFileDescriptor = resources.openRawResourceFd(modelResId)
-//            val configFileDescriptor = resources.openRawResourceFd(configResId)
-//            val tokenizerFileDescriptor = resources.openRawResourceFd(tokenizerResId)
-//
-//            loadWhisper(
-//                modelFileDescriptor.parcelFileDescriptor.detachFd(),
-//                modelFileDescriptor.startOffset.toULong(),
-//                modelFileDescriptor.length.toULong(),
-//
-//                configFileDescriptor.parcelFileDescriptor.detachFd(),
-//                configFileDescriptor.startOffset.toULong(),
-//                configFileDescriptor.length.toULong(),
-//
-//                tokenizerFileDescriptor.parcelFileDescriptor.detachFd(),
-//                tokenizerFileDescriptor.startOffset.toULong(),
-//                tokenizerFileDescriptor.length.toULong(),
-//            )
-//
-//            modelFileDescriptor.close()
-//            configFileDescriptor.close()
-//            tokenizerFileDescriptor.close()
-//
-//            loadedModel = model
-//
-//            println("loaded model")
-//        }
-
-
         var totalTranscriptionTime = 0L
 
         recordAndTranscribeJob = recordAndTranscribeScope.launch recordAndTranscribe@{
@@ -242,23 +187,82 @@ class MainRecognitionService : RecognitionService() {
             isSpeaking = false
             stopListening = false
 
-            val audioRmsScope = CoroutineScope(Dispatchers.IO)
+            // Decide ASR engine for this session: online Groq when enabled + key set, else on-device.
+            val prefs = application.dataStore.data.first()
+            val defaults = PreferencesUiState()
+            groqApiKey = prefs[stringPreferencesKey("GROQ_API_KEY")] ?: defaults.groqApiKey.second.value
+            useOnlineAsr = prefs[booleanPreferencesKey("USE_ONLINE_ASR")] ?: defaults.useOnlineAsr.second.value
+            inputLanguage = prefs[stringPreferencesKey("INPUT_LANGUAGE")] ?: defaults.inputLanguage.second.value
+
+            // Single-threaded: VAD detection + segment bookkeeping run once per audio buffer and
+            // mutate shared state; running them concurrently races and loses segments.
+            @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+            val audioRmsScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1))
             transcribeJobs.clear()
-            val transcriptions = mutableMapOf<Int, Transcription>()
+            // Written by both the record loop (creating segments) and the VAD scope — a plain
+            // HashMap races on structural modification; ConcurrentHashMap is safe for that.
+            val transcriptions = java.util.concurrent.ConcurrentHashMap<Int, Transcription>()
             var transcriptionIndex by mutableIntStateOf(0)
 
             listener?.readyForSpeech(Bundle())
+
+            // Fast online path (Murmur-style): record the whole utterance, fire ONE Groq call when
+            // the user stops. The per-segment VAD streaming below adds round-trips + serialised
+            // commits that only earn their keep for the slower on-device model — online wants speed.
+            if (useOnlineAsr && groqApiKey.isNotBlank()) {
+                val all = ArrayList<Short>(bufferSize * 8)
+                while (isRecording.get() && isActive) {
+                    val buffer = ShortArray(bufferSize)
+                    val n = audioRecord.read(buffer, 0, bufferSize)
+                    var i = 0
+                    while (i < n && all.size < MAX_SEGMENT_SAMPLES) { all.add(buffer[i]); i++ }
+                    if (n > 0) {
+                        var sum = 0.0
+                        for (j in 0 until n) { val v = buffer[j].toDouble(); sum += v * v }
+                        val rms = (kotlin.math.sqrt(sum / n) / 32767.0).coerceAtLeast(1e-6)
+                        val level = ((20.0 * kotlin.math.log10(rms) + 45.0) / 45.0).coerceIn(0.0, 1.0)
+                        listener?.rmsChanged((level * 12.0 - 2.0).toFloat()) // VoiceInput re-derives 0..1
+                    }
+                    if (stopListening) break
+                }
+                audioRecord.stop()
+                audioRecord.release()
+                if (!isActive) return@recordAndTranscribe
+                listener?.endOfSpeech()
+                val text = whisperRepository.transcribeAudio(all.toShortArray(), groqApiKey, inputLanguage)
+                if (!isActive) return@recordAndTranscribe
+                // Commit via partialResults (the keyboard inserts text there); results just finishes.
+                listener?.partialResults(Bundle().apply {
+                    putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
+                })
+                try {
+                    listener?.results(Bundle().apply {
+                        putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(""))
+                    })
+                } catch (e: RemoteException) {
+                    throw RuntimeException(e)
+                }
+                return@recordAndTranscribe
+            }
 
             while (isRecording.get() && isActive) {
                 val buffer = ShortArray(bufferSize)
 
                 val numberOfShorts = audioRecord.read(buffer, 0, bufferSize)
 
-                for (i in 0 until numberOfShorts) {
-                    if (transcriptions[transcriptionIndex] == null) {
-                        transcriptions[transcriptionIndex] = Transcription(start = null, end = null, text = null)
+                if (numberOfShorts > 0) {
+                    val seg = transcriptions.computeIfAbsent(transcriptionIndex) {
+                        Transcription(start = null, end = null, text = null)
                     }
-                    transcriptions[transcriptionIndex]!!.audioData.add(buffer[i])
+                    // Lock the segment's buffer: the record loop appends here while a transcribe
+                    // job may be slicing/clearing the same list — concurrent access corrupts it.
+                    synchronized(seg.audioData) {
+                        var i = 0
+                        while (i < numberOfShorts && seg.audioData.size < MAX_SEGMENT_SAMPLES) {
+                            seg.audioData.add(buffer[i])
+                            i++
+                        }
+                    }
                 }
 
                 if (!isActive) {
@@ -297,14 +301,18 @@ class MainRecognitionService : RecognitionService() {
                         val transcribeJob = transcribeScope.launch {
                             val timeBeforeTranscription = currentTimeMillis()
 
+                            val samples = synchronized(transcription.audioData) {
+                                transcription.audioData.slice(
+                                    ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(0))..
+                                        ((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
+                                ).toShortArray()
+                            }
+
                             val transcriptionText =
                                 whisperRepository.transcribeAudio(
-                                    transcription.audioData.slice(
-                                        ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(
-                                            0
-                                        ))..((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
-                                    )
-                                        .toShortArray(),
+                                    samples,
+                                    groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
+                                    inputLanguage,
                                 )
 
                             transcription.text = transcriptionText
@@ -317,7 +325,7 @@ class MainRecognitionService : RecognitionService() {
                                 }
                             }
 
-                            transcription.audioData.clear()
+                            synchronized(transcription.audioData) { transcription.audioData.clear() }
 
                             if (isPartialResults == true) {
                                 val bundle = Bundle().apply {
@@ -371,14 +379,18 @@ class MainRecognitionService : RecognitionService() {
                                         val transcribeJob = transcribeScope.launch {
                                             val timeBeforeTranscription = currentTimeMillis()
 
+                                            val samples = synchronized(transcription.audioData) {
+                                                transcription.audioData.slice(
+                                                    ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(0))..
+                                                        ((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
+                                                ).toShortArray()
+                                            }
+
                                             transcription.text =
                                                 whisperRepository.transcribeAudio(
-                                                    transcription.audioData.slice(
-                                                        ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(
-                                                            0
-                                                        ))..((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
-                                                    )
-                                                        .toShortArray(),
+                                                    samples,
+                                                    groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
+                                                    inputLanguage,
                                                 )
 
                                             totalTranscriptionTime += currentTimeMillis() - timeBeforeTranscription
@@ -389,7 +401,7 @@ class MainRecognitionService : RecognitionService() {
                                                 }
                                             }
 
-                                            transcription.audioData.clear()
+                                            synchronized(transcription.audioData) { transcription.audioData.clear() }
 
                                             if (isPartialResults == true) {
                                                 val bundle = Bundle().apply {

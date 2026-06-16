@@ -1,5 +1,14 @@
 package dev.soupslurpr.transcribro.ui.voiceinput
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -69,6 +78,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -287,29 +297,70 @@ fun VoiceKeyboard(
     }
 }
 
+/**
+ * Continuous ring-rotation + breathing values for the mic. Returns static 0s under
+ * [LocalInspectionMode] (previews / Roborazzi) so an endless animation can't hang screenshot tests.
+ */
+@Composable
+private fun micLoopAnim(listening: Boolean): Pair<Float, Float> {
+    if (LocalInspectionMode.current) return 0f to 0f
+    val loop = rememberInfiniteTransition(label = "micLoop")
+    val ringAngle by loop.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            tween(if (listening) 2600 else 6000, easing = LinearEasing),
+            RepeatMode.Restart,
+        ),
+        label = "ringAngle",
+    )
+    val breath by loop.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1500, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "breath",
+    )
+    return ringAngle to breath
+}
+
 @Composable
 private fun MicButton(listening: Boolean, pulse: Float, onClick: () -> Unit) {
-    val p = pulse.coerceIn(0f, 1f)
+    // Smooth the RMS pulse so the mic eases between levels instead of jittering.
+    val p by animateFloatAsState(
+        targetValue = pulse.coerceIn(0f, 1f),
+        animationSpec = tween(120, easing = FastOutSlowInEasing),
+        label = "micPulse",
+    )
+    // Fade the "listening" treatment (glow brightness, breathing) in and out on start/stop.
+    val activeAnim by animateFloatAsState(
+        targetValue = if (listening) 1f else 0f,
+        animationSpec = tween(280),
+        label = "micActive",
+    )
+    // Continuous ring-shine + breathing (frozen under inspection so screenshot tests don't hang).
+    val (ringAngle, breath) = micLoopAnim(listening)
+    val glowP = (p + breath * 0.18f * activeAnim).coerceIn(0f, 1f)
+
     Box(Modifier.size(116.dp), contentAlignment = Alignment.Center) {
-        // Soft glow halo — expands with the voice
+        // Soft glow halo — expands with the voice and breathes while listening
         Box(
             Modifier
                 .size(116.dp)
                 .graphicsLayer {
-                    val s = 1f + p * 0.40f
+                    val s = 1f + glowP * 0.40f
                     scaleX = s
                     scaleY = s
                 }
                 .background(
                     Brush.radialGradient(
-                        0f to Vk.accentHi.copy(alpha = if (listening) 0.55f + p * 0.25f else 0.34f),
+                        0f to Vk.accentHi.copy(alpha = 0.34f + activeAnim * (0.21f + glowP * 0.25f)),
                         0.42f to Vk.accent.copy(alpha = 0.20f),
                         1f to Color.Transparent,
                     ),
                     CircleShape,
                 )
         )
-        // Thin gradient ring around the mic
+        // Thin gradient ring — its sweep gradient rotates continuously for a moving shine
         Box(
             Modifier
                 .size(80.dp)
@@ -317,6 +368,7 @@ private fun MicButton(listening: Boolean, pulse: Float, onClick: () -> Unit) {
                     val s = 1f + p * 0.13f
                     scaleX = s
                     scaleY = s
+                    rotationZ = ringAngle
                 }
                 .border(
                     1.5.dp,
@@ -324,7 +376,7 @@ private fun MicButton(listening: Boolean, pulse: Float, onClick: () -> Unit) {
                     CircleShape,
                 )
         )
-        // Mic — pulses subtly in/out with the level
+        // Mic — pulses subtly in/out with the level; icon crossfades on start/stop
         Box(
             modifier = Modifier
                 .size(64.dp)
@@ -339,12 +391,14 @@ private fun MicButton(listening: Boolean, pulse: Float, onClick: () -> Unit) {
                 .clickable { onClick() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = if (listening) Icons.Filled.Stop else Icons.Outlined.Mic,
-                contentDescription = if (listening) "Stop" else "Start speaking",
-                tint = Color.White,
-                modifier = Modifier.size(26.dp),
-            )
+            Crossfade(targetState = listening, label = "micIcon") { isListening ->
+                Icon(
+                    imageVector = if (isListening) Icons.Filled.Stop else Icons.Outlined.Mic,
+                    contentDescription = if (isListening) "Stop" else "Start speaking",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
         }
     }
 }

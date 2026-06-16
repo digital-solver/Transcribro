@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.soupslurpr.transcribro.ui.voiceinput.VoiceKeyboard
@@ -31,11 +33,15 @@ class PreviewRenderTest {
         captureRoboImage("build/preview/$name.png") {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Box(Modifier.background(Color(0xFF0A0A0A)).width(360.dp).padding(8.dp)) {
-                    VoiceKeyboard(
-                        state = state,
-                        onMicClick = {}, onLangChip = {}, onToneChip = {}, onOverflow = {},
-                        onDeleteLast = {}, onUndoLast = {}, onNewLine = {}, onSwitchKeyboard = {},
-                    )
+                    // Inspection mode freezes the mic's endless ring/breathing animation so the
+                    // capture is deterministic and never waits on a never-settling animation.
+                    CompositionLocalProvider(LocalInspectionMode provides true) {
+                        VoiceKeyboard(
+                            state = state,
+                            onMicClick = {}, onLangChip = {}, onToneChip = {}, onOverflow = {},
+                            onDeleteLast = {}, onUndoLast = {}, onNewLine = {}, onSwitchKeyboard = {},
+                        )
+                    }
                 }
             }
         }

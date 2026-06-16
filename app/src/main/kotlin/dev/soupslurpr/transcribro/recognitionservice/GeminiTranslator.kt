@@ -12,7 +12,8 @@ import java.net.URL
  * Online translation via Gemini 3.1 Flash-Lite (free tier). On-device TranslateGemma is the offline
  * counterpart (same prompt). Sends text off-device, so route sensitive content to on-device instead.
  *
- * NOTE: verify the model id "gemini-3.1-flash-lite" against the live API before relying on it.
+ * Model id "gemini-3.1-flash-lite" verified live (2026-06-16): returns correct Thai (with the
+ * male ครับ/ผม register) and Spanish, and honours the Casual/Normal tone.
  */
 object GeminiTranslator {
     private const val MODEL = "gemini-3.1-flash-lite"

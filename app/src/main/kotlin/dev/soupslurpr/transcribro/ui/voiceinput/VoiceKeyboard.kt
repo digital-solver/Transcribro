@@ -306,9 +306,9 @@ fun VoiceKeyboard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            DeleteKey(onDeleteLast, onUndoLast)
             KeyButton("New line", Icons.AutoMirrored.Outlined.KeyboardReturn, onNewLine)
             KeyButton("Keyboard", Icons.Outlined.Keyboard, onSwitchKeyboard)
+            DeleteKey(onDeleteLast, onUndoLast)
         }
     }
 }

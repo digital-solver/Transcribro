@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowRightAlt
@@ -64,6 +65,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -109,6 +111,11 @@ private var isRecognizing by mutableStateOf(false)
 private var showInsufficientPermissionsError by mutableStateOf(false)
 
 private var isSpeaking by mutableStateOf(false)
+
+// Live UI state for the redesigned VoiceKeyboard panel, driven by the RecognitionListener.
+private var previewText by mutableStateOf("")
+private val waveLevels = mutableStateListOf<Float>()
+private var micPulse by mutableStateOf(0f)
 
 class VoiceInput : InputMethodService() {
     private val voiceInputLifecycleOwner = VoiceInputLifecycleOwner()
@@ -181,7 +188,7 @@ class VoiceInput : InputMethodService() {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(maxHeight)
+                        .wrapContentHeight()
                 ) {
                     Scaffold(
                         snackbarHost = {
@@ -191,7 +198,6 @@ class VoiceInput : InputMethodService() {
                         Box(
                             modifier = Modifier
                                 .padding(innerPadding)
-                                .padding(8.dp)
                         ) {
                             if (!acceptedPrivacyPolicyAndLicense) {
                                 ScreenLazyColumn {
@@ -250,6 +256,9 @@ class VoiceInput : InputMethodService() {
                                                 RecognitionListener {
                                                 override fun onReadyForSpeech(params: Bundle?) {
                                                     isRecognizing = true
+                                                    previewText = ""
+                                                    waveLevels.clear()
+                                                    micPulse = 0f
 
                                                     if (audioManager.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
                                                         startedRecognitionMediaPlayer.start()
@@ -261,7 +270,13 @@ class VoiceInput : InputMethodService() {
                                                 }
 
                                                 override fun onRmsChanged(rmsdB: Float) {
-//                TODO("Not yet implemented")
+                                                    // Drive the mic pulse + waveform. rmsdB is roughly -2..10+.
+                                                    val level = ((rmsdB + 2f) / 12f).coerceIn(0.06f, 1f)
+                                                    micPulse = level
+                                                    waveLevels.add(0, level)
+                                                    while (waveLevels.size > 20) {
+                                                        waveLevels.removeAt(waveLevels.size - 1)
+                                                    }
                                                 }
 
                                                 override fun onBufferReceived(buffer: ByteArray?) {
@@ -294,6 +309,9 @@ class VoiceInput : InputMethodService() {
 
                                                 override fun onResults(results: Bundle?) {
                                                     isRecognizing = false
+                                                    micPulse = 0f
+                                                    waveLevels.clear()
+                                                    previewText = ""
 
                                                     if (audioManager.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
                                                         stoppedRecognitionMediaPlayer.start()
@@ -312,6 +330,7 @@ class VoiceInput : InputMethodService() {
                                                             )?.get(0) ?: ""
 
                                                             if (transcription.isNotEmpty()) {
+                                                                previewText = transcription.trim()
                                                                 // Translation mode: translate the segment, then commit
                                                                 // (online Gemini; on-device TranslateGemma offline, B6).
                                                                 val translateEnabled =
@@ -490,516 +509,68 @@ class VoiceInput : InputMethodService() {
                                     }
                                 }
 
-                                Column(
-                                    Modifier
-                                        .fillMaxSize()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxSize(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(
-                                            Modifier.weight(1f)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .weight(0.25f)
-                                                    .padding(bottom = 6.dp),
-                                                verticalAlignment = Alignment.Top,
-                                                horizontalArrangement = Arrangement.Center
-                                            ) {
-                                                Column(
-                                                    modifier = Modifier
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth()
-                                                        .weight(0.5f),
-                                                ) {
-                                                    OutlinedIconButton(
-                                                        onClick = {
-                                                            speechRecognizer.value?.cancel()
-                                                            isRecognizing = false
-
-                                                            val intent = context.packageManager
-                                                                .getLaunchIntentForPackage(context.packageName)!!
-                                                                .apply {
-                                                                    action = (Intent.ACTION_APPLICATION_PREFERENCES)
-                                                                }
-
-                                                            startActivity(intent)
-                                                        },
-                                                        modifier = Modifier
-                                                            .fillMaxHeight()
-                                                            .fillMaxWidth()
-                                                            .weight(1f),
-                                                        shape = RoundedCornerShape(10.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Filled.Settings,
-                                                            contentDescription = "open Transcribro's settings"
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.size(8.dp))
-                                                    FilledTonalIconButton(
-                                                        onClick = {
-                                                            speechRecognizer.value?.cancel()
-                                                            isRecognizing = false
-                                                            switchToPreviousInputMethod()
-                                                        },
-                                                        modifier = Modifier
-                                                            .fillMaxHeight()
-                                                            .fillMaxWidth()
-                                                            .weight(1f),
-                                                        shape = RoundedCornerShape(10.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Filled.Keyboard,
-                                                            contentDescription = "Cancel recognition and switch to the previous input method"
-                                                        )
-                                                    }
-                                                }
-                                                Spacer(modifier = Modifier.size(8.dp))
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        if (isRecognizing) {
-                                                            speechRecognizer.value?.cancel()
-                                                            isRecognizing = false
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth()
-                                                        .weight(1f),
-                                                    enabled = isRecognizing,
-                                                    shape = RoundedCornerShape(10.dp)
-                                                ) {
-                                                    Text(
-                                                        "Cancel Recognition"
-                                                    )
-                                                }
-                                            }
-                                            // Tone + target-language control row.
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(bottom = 6.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                val tone = preferencesUiState.tone.second.value
-                                                FilledTonalButton(
-                                                    onClick = {
-                                                        val next = if (tone == "Casual") "Normal" else "Casual"
-                                                        preferencesUiState.tone.second.value = next
-                                                        preferencesViewModel.setPreference(
-                                                            preferencesUiState.tone.first, next
-                                                        )
-                                                    },
-                                                    modifier = Modifier.weight(1f),
-                                                    shape = RoundedCornerShape(10.dp)
-                                                ) {
-                                                    Text("Tone: $tone")
-                                                }
-                                                val translateOn = preferencesUiState.translateEnabled.second.value
-                                                val targetLang = preferencesUiState.targetLanguage.second.value
-                                                FilledTonalButton(
-                                                    onClick = {
-                                                        val next = !translateOn
-                                                        preferencesUiState.translateEnabled.second.value = next
-                                                        preferencesViewModel.setPreference(
-                                                            preferencesUiState.translateEnabled.first, next
-                                                        )
-                                                    },
-                                                    modifier = Modifier.weight(1f),
-                                                    shape = RoundedCornerShape(10.dp)
-                                                ) {
-                                                    Text(
-                                                        if (translateOn) {
-                                                            "→ ${Languages.shortLabel(targetLang)}"
-                                                        } else {
-                                                            "Translate: off"
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                            FilledIconToggleButton(
-                                                checked = isRecognizing,
-                                                onCheckedChange = {
-                                                    if (isRecognizing) {
-                                                        speechRecognizer.value?.stopListening()
-                                                    } else {
-                                                        speechRecognizer.value?.startListening(
-                                                            getStartListeningIntent(
-                                                                autoStopRecognition
-                                                            )
-                                                        )
-                                                    }
-                                                },
-                                                modifier = Modifier
-                                                    .fillMaxHeight()
-                                                    .fillMaxWidth()
-                                                    .weight(0.75f)
-                                                    .padding(top = 2.dp),
-                                                shape = RoundedCornerShape(10.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.Mic,
-                                                    contentDescription = if (isRecognizing) {
-                                                        "Speech recognition active"
-                                                    } else {
-                                                        "Speech recognition inactive"
-                                                    },
-                                                    modifier = Modifier.size(165.dp)
-                                                )
-                                            }
+                                VoiceKeyboard(
+                                    state = VoiceKeyboardState(
+                                        listening = isRecognizing,
+                                        translateOn = preferencesUiState.translateEnabled.second.value,
+                                        targetLang = Languages.shortLabel(
+                                            preferencesUiState.targetLanguage.second.value
+                                        ),
+                                        tone = preferencesUiState.tone.second.value,
+                                        previewText = previewText,
+                                        levels = waveLevels.toList().ifEmpty { List(20) { 0.1f } },
+                                        pulse = if (isRecognizing) micPulse else 0f,
+                                    ),
+                                    onMicClick = {
+                                        if (isRecognizing) {
+                                            speechRecognizer.value?.stopListening()
+                                        } else {
+                                            speechRecognizer.value?.startListening(
+                                                getStartListeningIntent(autoStopRecognition)
+                                            )
                                         }
-                                        Spacer(modifier = Modifier.size(8.dp))
-                                        Column(
-                                            modifier = Modifier.fillMaxWidth(0.4f)
-                                        ) {
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxHeight()
-                                                    .fillMaxWidth()
-                                                    .weight(1f),
-                                            ) {
-                                                FilledTonalButton(
-                                                    onClick = {
-                                                        val extractedText = currentInputConnection.getExtractedText(
-                                                            ExtractedTextRequest(),
-                                                            0
-                                                        ).text
-                                                        val beforeCursorText =
-                                                            currentInputConnection.getTextBeforeCursor(
-                                                                extractedText.length,
-                                                                0
-                                                            )
-                                                        val afterCursorText = currentInputConnection.getTextAfterCursor(
-                                                            extractedText.length,
-                                                            0
-                                                        )
-
-                                                        if (beforeCursorText != null) {
-                                                            if (afterCursorText != null) {
-                                                                currentInputConnection.deleteSurroundingText(
-                                                                    beforeCursorText.length,
-                                                                    afterCursorText.length
-                                                                )
-                                                            }
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth()
-                                                        .weight(1f),
-                                                    shape = RoundedCornerShape(10.dp)
-                                                ) {
-                                                    Text("Clear Unselected")
-                                                }
-                                                Spacer(modifier = Modifier.size(8.dp))
-                                                Row(
-                                                    Modifier
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth()
-                                                        .weight(1f),
-                                                ) {
-                                                    val undoInteractionSource =
-                                                        remember { MutableInteractionSource() }
-                                                    FilledTonalIconButton(
-                                                        onClick = {
-                                                            val downMetaState = KeyEvent.META_CTRL_ON
-                                                            val upMetaState = 0
-
-                                                            currentInputConnection.sendKeyEvent(
-                                                                KeyEvent(
-                                                                    System.currentTimeMillis(),
-                                                                    System.currentTimeMillis(),
-                                                                    KeyEvent.ACTION_DOWN,
-                                                                    KeyEvent.KEYCODE_Z,
-                                                                    0,
-                                                                    downMetaState
-                                                                )
-                                                            )
-                                                            currentInputConnection.sendKeyEvent(
-                                                                KeyEvent(
-                                                                    System.currentTimeMillis(),
-                                                                    System.currentTimeMillis(),
-                                                                    KeyEvent.ACTION_UP,
-                                                                    KeyEvent.KEYCODE_Z,
-                                                                    0,
-                                                                    upMetaState
-                                                                )
-                                                            )
-                                                        },
-                                                        modifier = Modifier
-                                                            .fillMaxHeight()
-                                                            .fillMaxWidth()
-                                                            .weight(1f)
-                                                            .longPressableKey(
-                                                                interactionSource = undoInteractionSource,
-                                                                onLongPress = {
-                                                                    while (isActive) {
-                                                                        val downMetaState =
-                                                                            KeyEvent.META_CTRL_ON
-                                                                        val upMetaState = 0
-
-                                                                        currentInputConnection.sendKeyEvent(
-                                                                            KeyEvent(
-                                                                                System.currentTimeMillis(),
-                                                                                System.currentTimeMillis(),
-                                                                                KeyEvent.ACTION_DOWN,
-                                                                                KeyEvent.KEYCODE_Z,
-                                                                                0,
-                                                                                downMetaState
-                                                                            )
-                                                                        )
-                                                                        currentInputConnection.sendKeyEvent(
-                                                                            KeyEvent(
-                                                                                System.currentTimeMillis(),
-                                                                                System.currentTimeMillis(),
-                                                                                KeyEvent.ACTION_UP,
-                                                                                KeyEvent.KEYCODE_Z,
-                                                                                0,
-                                                                                upMetaState
-                                                                            )
-                                                                        )
-                                                                        delay(getKeyRepeatDelay().milliseconds)
-                                                                    }
-                                                                },
-                                                            ),
-                                                        shape = RoundedCornerShape(10.dp),
-                                                        interactionSource = undoInteractionSource,
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.AutoMirrored.Outlined.Undo,
-                                                            contentDescription = "Undo",
-                                                            modifier = Modifier.fillMaxSize(0.5f)
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.size(8.dp))
-
-                                                    val redoInteractionSource =
-                                                        remember { MutableInteractionSource() }
-                                                    FilledTonalIconButton(
-                                                        onClick = {
-                                                            val downMetaState =
-                                                                KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON
-                                                            val upMetaState = 0
-
-                                                            currentInputConnection.sendKeyEvent(
-                                                                KeyEvent(
-                                                                    System.currentTimeMillis(),
-                                                                    System.currentTimeMillis(),
-                                                                    KeyEvent.ACTION_DOWN,
-                                                                    KeyEvent.KEYCODE_Z,
-                                                                    0,
-                                                                    downMetaState
-                                                                )
-                                                            )
-                                                            currentInputConnection.sendKeyEvent(
-                                                                KeyEvent(
-                                                                    System.currentTimeMillis(),
-                                                                    System.currentTimeMillis(),
-                                                                    KeyEvent.ACTION_UP,
-                                                                    KeyEvent.KEYCODE_Z,
-                                                                    0,
-                                                                    upMetaState
-                                                                )
-                                                            )
-                                                        },
-                                                        modifier = Modifier
-                                                            .fillMaxHeight()
-                                                            .fillMaxWidth()
-                                                            .weight(1f)
-                                                            .longPressableKey(
-                                                                interactionSource = redoInteractionSource,
-                                                                onLongPress = {
-                                                                    while (isActive) {
-                                                                        val downMetaState =
-                                                                            KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON
-                                                                        val upMetaState =
-                                                                            0
-
-                                                                        currentInputConnection.sendKeyEvent(
-                                                                            KeyEvent(
-                                                                                System.currentTimeMillis(),
-                                                                                System.currentTimeMillis(),
-                                                                                KeyEvent.ACTION_DOWN,
-                                                                                KeyEvent.KEYCODE_Z,
-                                                                                0,
-                                                                                downMetaState
-                                                                            )
-                                                                        )
-                                                                        currentInputConnection.sendKeyEvent(
-                                                                            KeyEvent(
-                                                                                System.currentTimeMillis(),
-                                                                                System.currentTimeMillis(),
-                                                                                KeyEvent.ACTION_UP,
-                                                                                KeyEvent.KEYCODE_Z,
-                                                                                0,
-                                                                                upMetaState
-                                                                            )
-                                                                        )
-                                                                        delay(getKeyRepeatDelay().milliseconds)
-                                                                    }
-                                                                }
-                                                            ),
-                                                        shape = RoundedCornerShape(10.dp),
-                                                        interactionSource = redoInteractionSource
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.AutoMirrored.Outlined.Redo,
-                                                            contentDescription = "Redo",
-                                                            modifier = Modifier.fillMaxSize(0.5f)
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.size(8.dp))
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxHeight()
-                                                    .fillMaxWidth()
-                                                    .weight(1f)
-                                            ) {
-                                                val backspaceInteractionSource =
-                                                    remember { MutableInteractionSource() }
-                                                FilledTonalIconButton(
-                                                    onClick = {
-                                                        val selectedText =
-                                                            currentInputConnection.getSelectedText(0)
-                                                        if (selectedText.isNullOrEmpty()) {
-                                                            currentInputConnection.deleteSurroundingText(1, 0)
-                                                        } else {
-                                                            currentInputConnection.commitText("", 1)
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth()
-                                                        .weight(1f)
-                                                        .longPressableKey(
-                                                            interactionSource = backspaceInteractionSource,
-                                                            onLongPress = {
-                                                                while (isActive) {
-                                                                    val selectedText =
-                                                                        currentInputConnection.getSelectedText(0)
-                                                                    if (selectedText.isNullOrEmpty()) {
-                                                                        currentInputConnection.deleteSurroundingText(1, 0)
-                                                                    } else {
-                                                                        currentInputConnection.commitText("", 1)
-                                                                    }
-                                                                    delay(getKeyRepeatDelay().milliseconds)
-                                                                }
-                                                            },
-                                                        ),
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    interactionSource = backspaceInteractionSource,
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Outlined.Backspace,
-                                                        contentDescription = "Backspace",
-                                                        modifier = Modifier.fillMaxSize(0.5f)
-                                                    )
-                                                }
-
-                                                Spacer(modifier = Modifier.size(8.dp))
-
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth()
-                                                        .weight(1f),
-                                                ) {
-                                                    // TODO: why is the actionId seemingly always 0???
-                                                    val (actionKeyIcon, actionKeyContentDescription) = when (currentInputEditorInfo.actionId) {
-                                                        EditorInfo.IME_ACTION_NEXT -> Pair(
-                                                            Icons.AutoMirrored.Outlined.NavigateNext,
-                                                            "Next"
-                                                        )
-
-                                                        EditorInfo.IME_ACTION_GO -> Pair(
-                                                            Icons.AutoMirrored.Outlined.ArrowRightAlt,
-                                                            "Go"
-                                                        )
-
-                                                        EditorInfo.IME_ACTION_SEND -> Pair(
-                                                            Icons.AutoMirrored.Outlined.Send,
-                                                            "Send"
-                                                        )
-
-                                                        EditorInfo.IME_ACTION_DONE -> Pair(Icons.Outlined.Done, "Done")
-                                                        EditorInfo.IME_ACTION_NONE -> Pair(Icons.Outlined.Block, "None")
-                                                        EditorInfo.IME_ACTION_PREVIOUS -> Pair(
-                                                            Icons.AutoMirrored.Outlined.NavigateBefore,
-                                                            "Previous"
-                                                        )
-
-                                                        EditorInfo.IME_ACTION_SEARCH -> Pair(
-                                                            Icons.Outlined.Search,
-                                                            "Search"
-                                                        )
-
-                                                        else -> Pair(Icons.AutoMirrored.Outlined.Send, "Send")
-                                                    }
-
-                                                    FilledTonalIconButton(
-                                                        onClick = {
-                                                            if (actionKeyContentDescription == "Send") {
-                                                                currentInputConnection.performEditorAction(EditorInfo.IME_ACTION_SEND)
-                                                            } else {
-                                                                currentInputConnection.performEditorAction(
-                                                                    currentInputEditorInfo.actionId
-                                                                )
-                                                            }
-                                                        },
-                                                        modifier = Modifier
-                                                            .fillMaxHeight()
-                                                            .fillMaxWidth()
-                                                            .weight(1f),
-                                                        shape = RoundedCornerShape(10.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = actionKeyIcon,
-                                                            contentDescription = actionKeyContentDescription,
-                                                            modifier = Modifier.fillMaxSize(0.5f)
-                                                        )
-                                                    }
-
-                                                    Spacer(modifier = Modifier.size(8.dp))
-
-                                                    FilledTonalIconButton(
-                                                        onClick = {
-                                                            currentInputConnection.sendKeyEvent(
-                                                                KeyEvent(
-                                                                    KeyEvent.ACTION_DOWN,
-                                                                    KeyEvent.KEYCODE_ENTER
-                                                                )
-                                                            )
-                                                            currentInputConnection.sendKeyEvent(
-                                                                KeyEvent(
-                                                                    KeyEvent.ACTION_UP,
-                                                                    KeyEvent.KEYCODE_ENTER
-                                                                )
-                                                            )
-                                                        },
-                                                        modifier = Modifier
-                                                            .fillMaxHeight()
-                                                            .fillMaxWidth()
-                                                            .weight(1f),
-                                                        shape = RoundedCornerShape(10.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.AutoMirrored.Outlined.KeyboardReturn,
-                                                            contentDescription = "Return",
-                                                            modifier = Modifier.fillMaxSize(0.5f)
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                    },
+                                    onLangChip = {
+                                        val next = !preferencesUiState.translateEnabled.second.value
+                                        preferencesUiState.translateEnabled.second.value = next
+                                        preferencesViewModel.setPreference(
+                                            preferencesUiState.translateEnabled.first, next
+                                        )
+                                    },
+                                    onToneChip = {
+                                        val next =
+                                            if (preferencesUiState.tone.second.value == "Casual") "Normal" else "Casual"
+                                        preferencesUiState.tone.second.value = next
+                                        preferencesViewModel.setPreference(
+                                            preferencesUiState.tone.first, next
+                                        )
+                                    },
+                                    onOverflow = {
+                                        speechRecognizer.value?.cancel()
+                                        isRecognizing = false
+                                        startActivity(
+                                            context.packageManager
+                                                .getLaunchIntentForPackage(context.packageName)!!
+                                                .apply { action = Intent.ACTION_APPLICATION_PREFERENCES }
+                                        )
+                                    },
+                                    onDeleteLast = {
+                                        val sel = currentInputConnection.getSelectedText(0)
+                                        if (sel.isNullOrEmpty()) {
+                                            currentInputConnection.deleteSurroundingText(1, 0)
+                                        } else {
+                                            currentInputConnection.commitText("", 1)
                                         }
-                                    }
-                                }
+                                    },
+                                    onNewLine = {
+                                        currentInputConnection.commitText("\n", 1)
+                                    },
+                                    onSwitchKeyboard = {
+                                        speechRecognizer.value?.cancel()
+                                        isRecognizing = false
+                                        switchToPreviousInputMethod()
+                                    },
+                                )
                             }
                         }
                     }

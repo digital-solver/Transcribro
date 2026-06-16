@@ -354,7 +354,8 @@ class VoiceInput : InputMethodService() {
                                                                             if (geminiKey.isNotBlank()) {
                                                                                 try {
                                                                                     return@run GeminiTranslator.translate(
-                                                                                        trimmed, targetLanguage, toneValue, geminiKey
+                                                                                        trimmed, targetLanguage, toneValue, geminiKey,
+                                                                                        preferencesUiState.inputLanguage.second.value,
                                                                                     )
                                                                                 } catch (_: Exception) {
                                                                                 }

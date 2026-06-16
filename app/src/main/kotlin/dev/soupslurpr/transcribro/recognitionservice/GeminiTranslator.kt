@@ -30,10 +30,13 @@ object GeminiTranslator {
         targetLanguage: String,
         tone: String,
         apiKey: String,
+        sourceLanguage: String = "en",
     ): String = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext text
+        // Same language in and out → nothing to translate.
+        if (sourceLanguage == targetLanguage) return@withContext text
         val langName = Languages.englishName(targetLanguage)
-        val prompt = buildTranslatePrompt(text, langName, targetLanguage, tone)
+        val prompt = buildTranslatePrompt(text, langName, targetLanguage, tone, sourceLanguage)
 
         val body = JSONObject().apply {
             put(
@@ -72,14 +75,21 @@ object GeminiTranslator {
     }
 
     /** Shared prompt builder — also used by the on-device TranslateGemma path. */
-    fun buildTranslatePrompt(text: String, langName: String, targetLanguage: String, tone: String): String {
+    fun buildTranslatePrompt(
+        text: String,
+        langName: String,
+        targetLanguage: String,
+        tone: String,
+        sourceLanguage: String = "en",
+    ): String {
         val toneDesc = if (tone == "Casual") {
             "casual, friendly tone, like texting a close friend"
         } else {
             "standard polite-neutral tone, natural and safe to send to anyone (not slangy, not stiff)"
         }
+        val sourceName = Languages.englishName(sourceLanguage)
         return buildString {
-            append("Translate the following English message into $langName. ")
+            append("Translate the following $sourceName message into $langName. ")
             append("The speaker is MALE — use the correct masculine and politeness forms for $langName")
             if (targetLanguage == "th") append(" (use ผม and ครับ where natural)")
             append(". Tone: $toneDesc. Preserve numbers, times, and names exactly. ")

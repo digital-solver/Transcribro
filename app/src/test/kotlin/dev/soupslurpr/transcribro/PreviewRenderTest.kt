@@ -34,7 +34,7 @@ class PreviewRenderTest {
                     VoiceKeyboard(
                         state = state,
                         onMicClick = {}, onLangChip = {}, onToneChip = {}, onOverflow = {},
-                        onDeleteLast = {}, onNewLine = {}, onSwitchKeyboard = {},
+                        onDeleteLast = {}, onUndoLast = {}, onNewLine = {}, onSwitchKeyboard = {},
                     )
                 }
             }

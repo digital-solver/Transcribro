@@ -117,6 +117,10 @@ private var previewText by mutableStateOf("")
 private val waveLevels = mutableStateListOf<Float>()
 private var micPulse by mutableStateOf(0f)
 
+// Total characters committed during the current/last dictation session — lets the delete key's
+// drag-up gesture undo the whole last input. Reset at each session start.
+private var lastInputLength = 0
+
 class VoiceInput : InputMethodService() {
     private val voiceInputLifecycleOwner = VoiceInputLifecycleOwner()
 
@@ -253,6 +257,7 @@ class VoiceInput : InputMethodService() {
                                                     previewText = ""
                                                     waveLevels.clear()
                                                     micPulse = 0f
+                                                    lastInputLength = 0
 
                                                     if (audioManager.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
                                                         startedRecognitionMediaPlayer.start()
@@ -356,10 +361,10 @@ class VoiceInput : InputMethodService() {
                                                                             }
                                                                             trimmed
                                                                         }
-                                                                        ic.commitText(
-                                                                            (if (needsLeadingSpace) " " else "") + translated,
-                                                                            1
-                                                                        )
+                                                                        val toCommit =
+                                                                            (if (needsLeadingSpace) " " else "") + translated
+                                                                        ic.commitText(toCommit, 1)
+                                                                        lastInputLength += toCommit.length
                                                                         if (autoSend) {
                                                                             ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
                                                                         }
@@ -478,6 +483,7 @@ class VoiceInput : InputMethodService() {
                                                                     textToCommit,
                                                                     1
                                                                 )
+                                                                lastInputLength += textToCommit.length
 
                                                                 if (preferencesUiState.autoSendTranscription.second.value) {
                                                                     ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
@@ -554,6 +560,12 @@ class VoiceInput : InputMethodService() {
                                             currentInputConnection.deleteSurroundingText(1, 0)
                                         } else {
                                             currentInputConnection.commitText("", 1)
+                                        }
+                                    },
+                                    onUndoLast = {
+                                        if (lastInputLength > 0) {
+                                            currentInputConnection.deleteSurroundingText(lastInputLength, 0)
+                                            lastInputLength = 0
                                         }
                                     },
                                     onNewLine = {

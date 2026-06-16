@@ -60,9 +60,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -128,6 +137,7 @@ fun VoiceKeyboard(
     onToneChip: () -> Unit,
     onOverflow: () -> Unit,
     onDeleteLast: () -> Unit,
+    onUndoLast: () -> Unit,
     onNewLine: () -> Unit,
     onSwitchKeyboard: () -> Unit,
     modifier: Modifier = Modifier,
@@ -270,7 +280,7 @@ fun VoiceKeyboard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            DeleteKey(onDeleteLast)
+            DeleteKey(onDeleteLast, onUndoLast)
             KeyButton("New line", Icons.AutoMirrored.Outlined.KeyboardReturn, onNewLine)
             KeyButton("Keyboard", Icons.Outlined.Keyboard, onSwitchKeyboard)
         }
@@ -418,76 +428,146 @@ private fun RowScope.KeyButton(
 }
 
 /**
- * Delete key with Gboard-style behaviour: tap deletes one, press-and-hold repeats (accelerating),
- * and dragging left deletes more the further you drag. [onDelete] removes one unit each call.
+ * Delete key with Gboard-style behaviour plus an Undo affordance:
+ * - tap deletes one, press-and-hold repeats (accelerating), dragging left deletes more.
+ * - dragging UP arms a floating "Undo last" chip; releasing while armed reverts the whole last
+ *   dictation via [onUndo]. [onDelete] removes one unit each call.
  */
 @Composable
-private fun RowScope.DeleteKey(onDelete: () -> Unit) {
+private fun RowScope.DeleteKey(onDelete: () -> Unit, onUndo: () -> Unit) {
     val scope = rememberCoroutineScope()
-    Column(
-        modifier = Modifier
-            .weight(1f)
-            .height(58.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Vk.key)
-            .border(1.dp, Vk.keyBorder, RoundedCornerShape(16.dp))
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    onDelete() // delete one immediately on touch
-                    var dragAcc = 0f
-                    var dragging = false
-                    val stepPx = 20.dp.toPx()
-                    // Hold to repeat (accelerating) — cancelled once the finger drags or lifts.
-                    val holdJob = scope.launch {
-                        delay(350)
-                        var interval = 90L
-                        while (true) {
-                            onDelete()
-                            delay(interval)
-                            interval = (interval * 88 / 100).coerceAtLeast(28)
-                        }
-                    }
-                    try {
-                        while (true) {
-                            val change = awaitPointerEvent().changes.firstOrNull() ?: break
-                            if (!change.pressed) break
-                            val dx = change.positionChange().x
-                            if (dragging || abs(dx) > 6f) {
-                                if (!dragging) {
-                                    dragging = true
-                                    holdJob.cancel() // dragging supersedes hold-repeat
-                                }
-                                dragAcc += dx
-                                while (dragAcc <= -stepPx) { // leftward drag deletes more
-                                    onDelete()
-                                    dragAcc += stepPx
-                                }
-                                if (dragAcc > 0f) dragAcc = 0f
-                                change.consume()
+    val density = LocalDensity.current
+    var pressing by remember { mutableStateOf(false) }
+    var undoArmed by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.weight(1f)) {
+        if (pressing && undoArmed) {
+            Popup(
+                alignment = Alignment.TopCenter,
+                offset = IntOffset(0, with(density) { (-52).dp.roundToPx() }),
+                properties = PopupProperties(focusable = false),
+            ) {
+                UndoChip()
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(58.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (undoArmed) Vk.chipActive else Vk.key)
+                .border(
+                    1.dp,
+                    if (undoArmed) Vk.accent else Vk.keyBorder,
+                    RoundedCornerShape(16.dp),
+                )
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        pressing = true
+                        val startY = down.position.y
+                        var mode = 0 // 0 = undecided, 1 = undo (drag up), 2 = delete-drag (left)
+                        var dragAcc = 0f
+                        var holdFired = false
+                        val stepPx = 20.dp.toPx()
+                        val upPx = 28.dp.toPx()
+                        // Hold to repeat (accelerating) — cancelled once a drag or lift decides the gesture.
+                        val holdJob = scope.launch {
+                            delay(350)
+                            holdFired = true
+                            var interval = 90L
+                            while (true) {
+                                onDelete()
+                                delay(interval)
+                                interval = (interval * 88 / 100).coerceAtLeast(28)
                             }
                         }
-                    } finally {
-                        holdJob.cancel()
+                        try {
+                            while (true) {
+                                val change = awaitPointerEvent().changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                val dy = change.position.y - startY
+                                val dx = change.positionChange().x
+                                if (mode == 0) {
+                                    if (dy < -upPx) {
+                                        mode = 1
+                                        holdJob.cancel()
+                                    } else if (abs(dx) > 6f) {
+                                        mode = 2
+                                        holdJob.cancel()
+                                    }
+                                }
+                                when (mode) {
+                                    1 -> {
+                                        undoArmed = dy < -upPx // re-disarm if the finger drops back down
+                                        change.consume()
+                                    }
+                                    2 -> {
+                                        dragAcc += dx
+                                        while (dragAcc <= -stepPx) { // leftward drag deletes more
+                                            onDelete()
+                                            dragAcc += stepPx
+                                        }
+                                        if (dragAcc > 0f) dragAcc = 0f
+                                        change.consume()
+                                    }
+                                }
+                            }
+                        } finally {
+                            holdJob.cancel()
+                            if (mode == 1 && undoArmed) {
+                                onUndo()
+                            } else if (mode == 0 && !holdFired) {
+                                onDelete() // quick tap (no drag, hold never fired)
+                            }
+                            pressing = false
+                            undoArmed = false
+                        }
                     }
-                }
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceEvenly,
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Outlined.Backspace,
+                contentDescription = "Delete (hold to repeat, drag left for more, drag up to undo)",
+                tint = if (undoArmed) Vk.accentHi else Vk.keyIcon,
+                modifier = Modifier.size(22.dp),
+            )
+            Text(
+                "Delete",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (undoArmed) Vk.chipTextActive else Vk.keyLabel,
+                maxLines = 1,
+                style = KeyLabelStyle,
+            )
+        }
+    }
+}
+
+/** Floating chip shown above the delete key while a drag-up Undo is armed. */
+@Composable
+private fun UndoChip() {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Vk.chipActive)
+            .border(1.dp, Vk.accent, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.AutoMirrored.Outlined.Backspace,
-            contentDescription = "Delete (hold to repeat, drag left to delete more)",
-            tint = Vk.keyIcon,
-            modifier = Modifier.size(22.dp),
+            Icons.AutoMirrored.Outlined.Undo,
+            contentDescription = null,
+            tint = Vk.accentHi,
+            modifier = Modifier.size(18.dp),
         )
+        Spacer(Modifier.width(6.dp))
         Text(
-            "Delete",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            color = Vk.keyLabel,
-            maxLines = 1,
-            style = KeyLabelStyle,
+            "Undo last",
+            color = Vk.chipTextActive,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

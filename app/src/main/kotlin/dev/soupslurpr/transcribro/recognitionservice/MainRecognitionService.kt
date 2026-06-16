@@ -47,6 +47,11 @@ private data class Transcription(
 class MainRecognitionService : RecognitionService() {
     companion object {
         const val EXTRA_AUTO_STOP = "dev.soupslurpr.transcribro.EXTRA_AUTO_STOP"
+
+        // Cap one segment's audio so the buffer can't grow unbounded if VAD never fires an "end"
+        // (continuous speech or pure silence) — otherwise the list grows until OutOfMemoryError.
+        // 16 kHz * 180 s ≈ 5.8 MB.
+        private const val MAX_SEGMENT_SAMPLES = 16000 * 180
     }
 
     private val recordAndTranscribeScope = CoroutineScope(Dispatchers.IO)
@@ -281,7 +286,10 @@ class MainRecognitionService : RecognitionService() {
                     if (transcriptions[transcriptionIndex] == null) {
                         transcriptions[transcriptionIndex] = Transcription(start = null, end = null, text = null)
                     }
-                    transcriptions[transcriptionIndex]!!.audioData.add(buffer[i])
+                    val seg = transcriptions[transcriptionIndex]!!
+                    if (seg.audioData.size < MAX_SEGMENT_SAMPLES) {
+                        seg.audioData.add(buffer[i])
+                    }
                 }
 
                 if (!isActive) {

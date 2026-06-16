@@ -206,6 +206,45 @@ class MainRecognitionService : RecognitionService() {
 
             listener?.readyForSpeech(Bundle())
 
+            // Fast online path (Murmur-style): record the whole utterance, fire ONE Groq call when
+            // the user stops. The per-segment VAD streaming below adds round-trips + serialised
+            // commits that only earn their keep for the slower on-device model — online wants speed.
+            if (useOnlineAsr && groqApiKey.isNotBlank()) {
+                val all = ArrayList<Short>(bufferSize * 8)
+                while (isRecording.get() && isActive) {
+                    val buffer = ShortArray(bufferSize)
+                    val n = audioRecord.read(buffer, 0, bufferSize)
+                    var i = 0
+                    while (i < n && all.size < MAX_SEGMENT_SAMPLES) { all.add(buffer[i]); i++ }
+                    if (n > 0) {
+                        var sum = 0.0
+                        for (j in 0 until n) { val v = buffer[j].toDouble(); sum += v * v }
+                        val rms = (kotlin.math.sqrt(sum / n) / 32767.0).coerceAtLeast(1e-6)
+                        val level = ((20.0 * kotlin.math.log10(rms) + 45.0) / 45.0).coerceIn(0.0, 1.0)
+                        listener?.rmsChanged((level * 12.0 - 2.0).toFloat()) // VoiceInput re-derives 0..1
+                    }
+                    if (stopListening) break
+                }
+                audioRecord.stop()
+                audioRecord.release()
+                if (!isActive) return@recordAndTranscribe
+                listener?.endOfSpeech()
+                val text = whisperRepository.transcribeAudio(all.toShortArray(), groqApiKey, inputLanguage)
+                if (!isActive) return@recordAndTranscribe
+                // Commit via partialResults (the keyboard inserts text there); results just finishes.
+                listener?.partialResults(Bundle().apply {
+                    putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
+                })
+                try {
+                    listener?.results(Bundle().apply {
+                        putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(""))
+                    })
+                } catch (e: RemoteException) {
+                    throw RuntimeException(e)
+                }
+                return@recordAndTranscribe
+            }
+
             while (isRecording.get() && isActive) {
                 val buffer = ShortArray(bufferSize)
 

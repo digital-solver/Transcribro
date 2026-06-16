@@ -108,6 +108,11 @@ private var speechRecognizer: MutableState<SpeechRecognizer?> = mutableStateOf(n
 
 private var isRecognizing by mutableStateOf(false)
 
+// Set the instant the user taps stop, cleared when the final result (or an error) lands. Drives
+// the mic's "finishing" spinner for immediate feedback, and blocks a double-tap that would
+// otherwise hit ERROR_RECOGNIZER_BUSY and pop the "Recognition is finishing" banner.
+private var isStopping by mutableStateOf(false)
+
 private var showInsufficientPermissionsError by mutableStateOf(false)
 
 private var isSpeaking by mutableStateOf(false)
@@ -287,6 +292,7 @@ class VoiceInput : InputMethodService() {
                                                 }
 
                                                 override fun onError(error: Int) {
+                                                    isStopping = false
                                                     when (error) {
                                                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
                                                             showInsufficientPermissionsError = true
@@ -308,6 +314,7 @@ class VoiceInput : InputMethodService() {
 
                                                 override fun onResults(results: Bundle?) {
                                                     isRecognizing = false
+                                                    isStopping = false
                                                     micPulse = 0f
                                                     waveLevels.clear()
                                                     previewText = ""
@@ -513,6 +520,7 @@ class VoiceInput : InputMethodService() {
                                 VoiceKeyboard(
                                     state = VoiceKeyboardState(
                                         listening = isRecognizing,
+                                        processing = isStopping,
                                         translateOn = preferencesUiState.translateEnabled.second.value,
                                         targetLang = Languages.shortLabel(
                                             preferencesUiState.targetLanguage.second.value
@@ -520,15 +528,20 @@ class VoiceInput : InputMethodService() {
                                         tone = preferencesUiState.tone.second.value,
                                         previewText = previewText,
                                         levels = waveLevels.toList().ifEmpty { List(20) { 0.1f } },
-                                        pulse = if (isRecognizing) micPulse else 0f,
+                                        pulse = if (isRecognizing && !isStopping) micPulse else 0f,
                                     ),
                                     onMicClick = {
-                                        if (isRecognizing) {
-                                            speechRecognizer.value?.stopListening()
-                                        } else {
-                                            speechRecognizer.value?.startListening(
-                                                getStartListeningIntent(autoStopRecognition)
-                                            )
+                                        when {
+                                            isStopping -> {} // already finishing — ignore taps
+                                            isRecognizing -> {
+                                                isStopping = true // instant feedback + block double-tap
+                                                speechRecognizer.value?.stopListening()
+                                            }
+                                            else -> {
+                                                speechRecognizer.value?.startListening(
+                                                    getStartListeningIntent(autoStopRecognition)
+                                                )
+                                            }
                                         }
                                     },
                                     onLangChip = {

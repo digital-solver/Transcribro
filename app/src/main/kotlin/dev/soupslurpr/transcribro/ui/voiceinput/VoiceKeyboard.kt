@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -92,6 +93,8 @@ import kotlin.math.abs
  */
 data class VoiceKeyboardState(
     val listening: Boolean = false,
+    /** Tapped stop, waiting for the final transcript — mic shows a spinner. */
+    val processing: Boolean = false,
     val inputLang: String = "EN",
     val translateOn: Boolean = false,
     val targetLang: String = "TH",
@@ -257,7 +260,7 @@ fun VoiceKeyboard(
                     .fillMaxWidth()
                     .height(50.dp),
             )
-            MicButton(listening = state.listening, pulse = state.pulse, onClick = onMicClick)
+            MicButton(listening = state.listening, processing = state.processing, pulse = state.pulse, onClick = onMicClick)
         }
 
         // Phrase preview — blue stylised quotes around white text (reference style).
@@ -324,7 +327,7 @@ private fun micLoopAnim(listening: Boolean): Pair<Float, Float> {
 }
 
 @Composable
-private fun MicButton(listening: Boolean, pulse: Float, onClick: () -> Unit) {
+private fun MicButton(listening: Boolean, processing: Boolean, pulse: Float, onClick: () -> Unit) {
     // Smooth the RMS pulse so the mic eases between levels instead of jittering.
     val p by animateFloatAsState(
         targetValue = pulse.coerceIn(0f, 1f),
@@ -391,13 +394,21 @@ private fun MicButton(listening: Boolean, pulse: Float, onClick: () -> Unit) {
                 .clickable { onClick() },
             contentAlignment = Alignment.Center,
         ) {
-            Crossfade(targetState = listening, label = "micIcon") { isListening ->
-                Icon(
-                    imageVector = if (isListening) Icons.Filled.Stop else Icons.Outlined.Mic,
-                    contentDescription = if (isListening) "Stop" else "Start speaking",
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp),
+            if (processing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = Color.White,
+                    strokeWidth = 2.5.dp,
                 )
+            } else {
+                Crossfade(targetState = listening, label = "micIcon") { isListening ->
+                    Icon(
+                        imageVector = if (isListening) Icons.Filled.Stop else Icons.Outlined.Mic,
+                        contentDescription = if (isListening) "Stop" else "Start speaking",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
             }
         }
     }

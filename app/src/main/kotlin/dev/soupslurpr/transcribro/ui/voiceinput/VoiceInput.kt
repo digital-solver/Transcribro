@@ -521,6 +521,8 @@ class VoiceInput : InputMethodService() {
                                     state = VoiceKeyboardState(
                                         listening = isRecognizing,
                                         processing = isStopping,
+                                        engineOnline = preferencesUiState.useOnlineAsr.second.value &&
+                                            preferencesUiState.groqApiKey.second.value.isNotBlank(),
                                         translateOn = preferencesUiState.translateEnabled.second.value,
                                         targetLang = Languages.shortLabel(
                                             preferencesUiState.targetLanguage.second.value

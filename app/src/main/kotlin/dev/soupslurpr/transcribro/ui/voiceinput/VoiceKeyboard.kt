@@ -95,6 +95,8 @@ data class VoiceKeyboardState(
     val listening: Boolean = false,
     /** Tapped stop, waiting for the final transcript — mic shows a spinner. */
     val processing: Boolean = false,
+    /** Which ASR engine is configured: online Groq (true) vs the on-device model (false). */
+    val engineOnline: Boolean = true,
     val inputLang: String = "EN",
     val translateOn: Boolean = false,
     val targetLang: String = "TH",
@@ -163,13 +165,24 @@ fun VoiceKeyboard(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // Drag handle
-        Box(
-            Modifier
-                .align(Alignment.CenterHorizontally)
-                .size(width = 34.dp, height = 4.dp)
-                .background(Vk.faint, CircleShape)
-        )
+        // Engine indicator — tells you at a glance whether online Groq or the on-device model is active.
+        Row(
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .background(if (state.engineOnline) Vk.cyan else Vk.keyLabel, CircleShape)
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                if (state.engineOnline) "Groq · online" else "On-device",
+                fontSize = 10.sp,
+                color = Vk.preview,
+                style = KeyLabelStyle,
+            )
+        }
 
         // Segmented pill — status · input language · tone · overflow, full width with dividers.
         Row(

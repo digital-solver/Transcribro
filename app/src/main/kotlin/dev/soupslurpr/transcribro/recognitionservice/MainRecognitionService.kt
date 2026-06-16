@@ -104,7 +104,9 @@ class MainRecognitionService : RecognitionService() {
                     val SAMPLE_RATE = 16000
                     val START_THRESHOLD = 0.6f
                     val END_THRESHOLD = 0.45f
-                    val MIN_SILENCE_DURATION_MS = 3000
+                    // How long a pause ends a segment + triggers transcription. 3 s felt laggy;
+                    // 1.2 s makes dictation noticeably snappier while still tolerating brief pauses.
+                    val MIN_SILENCE_DURATION_MS = 1200
                     val SPEECH_PAD_MS = 0
 
                     val model =

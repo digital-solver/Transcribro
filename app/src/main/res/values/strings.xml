@@ -46,8 +46,8 @@
     <string name="gemini_api_key_setting_name">Gemini API key</string>
     <string name="gemini_api_key_setting_description">Free key from Google AI Studio for online translation</string>
     <string name="downloading_model">Downloading model</string>
-    <string name="download_model_setting_name">Download on-device model</string>
-    <string name="download_model_setting_description">Download the offline speech model (~250 MB) so recognition works without internet</string>
+    <string name="download_model_setting_name">Download offline model (Whisper small.en)</string>
+    <string name="download_model_setting_description">FUTO\'s ACFT-fine-tuned Whisper small.en — 244M parameters, ~252 MB, English-only, tuned for the short audio windows a keyboard uses. Download it so dictation works offline (no internet needed). Online recognition uses Groq Whisper large-v3-turbo instead.</string>
     <string name="translation_language_setting_name">Translation language</string>
     <string name="translation_language_setting_description">Speak English, get this language when translation is on. Currently: %1$s</string>
     <string name="translation_language_dialog_title">Translation language</string>

@@ -166,22 +166,41 @@ fun StartScreen() {
             }
         }
         item {
-            if (!isMyInputMethodEnabled) {
-                ElevatedCard {
-                    Column(
-                        Modifier.padding(16.dp)
-                    ) {
-                        Text("To use the Voice Translate keyboard, turn it on in system settings.")
-                        Spacer(Modifier.padding(8.dp))
-                        FilledTonalButton(
-                            onClick = {
-                                val intent = Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
-                                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                context.startActivity(intent)
-                            }
-                        ) {
-                            Text("Open on-screen keyboard system settings")
+            // Always shown so it's findable even after the keyboard is enabled.
+            ElevatedCard {
+                Column(
+                    Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        if (isMyInputMethodEnabled) {
+                            "Voice Translate is enabled as a keyboard ✓. To use it, switch to it from any text " +
+                                "field with the keyboard-switcher, or tap “Switch to Voice Translate” below."
+                        } else {
+                            "To use Voice Translate, first enable it as a keyboard in system settings, then " +
+                                "switch to it."
                         }
+                    )
+                    Spacer(Modifier.padding(8.dp))
+                    FilledTonalButton(
+                        onClick = {
+                            val intent = Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
+                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            context.startActivity(intent)
+                        }
+                    ) {
+                        Text(
+                            if (isMyInputMethodEnabled) "Open keyboard settings"
+                            else "Enable Voice Translate keyboard"
+                        )
+                    }
+                    Spacer(Modifier.padding(4.dp))
+                    FilledTonalButton(
+                        onClick = {
+                            (context.getSystemService(InputMethodManager::class.java))
+                                ?.showInputMethodPicker()
+                        }
+                    ) {
+                        Text("Switch to Voice Translate")
                     }
                 }
             }

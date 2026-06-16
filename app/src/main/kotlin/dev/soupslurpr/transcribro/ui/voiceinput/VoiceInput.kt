@@ -190,15 +190,9 @@ class VoiceInput : InputMethodService() {
                         .fillMaxWidth()
                         .wrapContentHeight()
                 ) {
-                    Scaffold(
-                        snackbarHost = {
-                            SnackbarHost(snackbarHostState)
-                        },
-                    ) { innerPadding ->
-                        Box(
-                            modifier = Modifier
-                                .padding(innerPadding)
-                        ) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                             if (!acceptedPrivacyPolicyAndLicense) {
                                 ScreenLazyColumn {
                                     item {
@@ -572,7 +566,10 @@ class VoiceInput : InputMethodService() {
                                     },
                                 )
                             }
-                        }
+                            SnackbarHost(
+                                snackbarHostState,
+                                modifier = Modifier.align(Alignment.BottomCenter)
+                            )
                     }
                 }
             }

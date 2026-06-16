@@ -36,7 +36,7 @@ data class PreferencesUiState(
     /** Whether to automatically start recognition when switching from another input method. */
     val autoStartRecognition: Pair<Preferences.Key<Boolean>, MutableState<Boolean>> = Pair(
         (booleanPreferencesKey("AUTO_START_RECOGNITION")),
-        mutableStateOf(true)
+        mutableStateOf(false)
     ),
 
     /** Whether to automatically send transcription when speech stops being detected. */

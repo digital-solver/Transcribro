@@ -193,14 +193,16 @@ fun StartScreen() {
                             else "Enable Voice Translate keyboard"
                         )
                     }
-                    Spacer(Modifier.padding(4.dp))
-                    FilledTonalButton(
-                        onClick = {
-                            (context.getSystemService(InputMethodManager::class.java))
-                                ?.showInputMethodPicker()
+                    if (isMyInputMethodEnabled) {
+                        Spacer(Modifier.padding(4.dp))
+                        FilledTonalButton(
+                            onClick = {
+                                (context.getSystemService(InputMethodManager::class.java))
+                                    ?.showInputMethodPicker()
+                            }
+                        ) {
+                            Text("Switch to Voice Translate")
                         }
-                    ) {
-                        Text("Switch to Voice Translate")
                     }
                 }
             }

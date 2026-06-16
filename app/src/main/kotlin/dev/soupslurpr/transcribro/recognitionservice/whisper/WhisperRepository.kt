@@ -28,6 +28,13 @@ class WhisperRepository(
             (data[index] / 32767.0f).coerceIn(-1f..1f)
         }
 
+        // Skip near-silent segments. Whisper hallucinates stock phrases ("Thank you.", "you")
+        // on silence, and the VAD occasionally fires a false "start" on background noise; gating
+        // on RMS energy keeps those out of the transcript (and saves a needless API call).
+        if (samples.isEmpty() || rms(samples) < SILENCE_RMS_THRESHOLD) {
+            return ""
+        }
+
         if (!groqApiKey.isNullOrBlank()) {
             try {
                 // Groq wants the real (un-padded) audio.
@@ -58,5 +65,17 @@ class WhisperRepository(
 
     suspend fun release() {
         whisperContext.value?.release()
+    }
+
+    /** Root-mean-square amplitude of normalized [-1, 1] PCM — a cheap speech/silence energy gauge. */
+    private fun rms(samples: FloatArray): Float {
+        var sum = 0.0
+        for (s in samples) sum += s.toDouble() * s
+        return kotlin.math.sqrt(sum / samples.size).toFloat()
+    }
+
+    companion object {
+        // ≈ -40 dBFS. Below this a segment is silence/background noise, not speech.
+        private const val SILENCE_RMS_THRESHOLD = 0.01f
     }
 }

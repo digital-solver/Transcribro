@@ -12,7 +12,6 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.whispercpp.whisper.WhisperContext
 import dev.soupslurpr.transcribro.recognitionservice.silerovad.SileroVadApi
@@ -62,11 +61,13 @@ class MainRecognitionService : RecognitionService() {
 
     private var recordAndTranscribeJob: Job? = null
 
-//    private var loadedModel: WhichModel? = null
+    // Cross-thread flags: set from the record/VAD coroutines and the binder thread
+    // (onStopListening), read from the record loop — @Volatile for visibility.
+    @Volatile
+    private var isSpeaking = false
 
-    private var isSpeaking by mutableStateOf(false)
-
-    private var stopListening by mutableStateOf(false)
+    @Volatile
+    private var stopListening = false
 
     // Added to + iterated across coroutines. A plain list throws ConcurrentModificationException,
     // which kills the transcribe coroutine and drops every segment after the first — use a
@@ -174,85 +175,6 @@ class MainRecognitionService : RecognitionService() {
         }
 
 
-//        val model = when (recognizerIntent?.extras?.getString(RecognizerIntent.EXTRA_LANGUAGE_MODEL)) {
-//            "TINY_EN_Q8_0" -> WhichModel.TINY_EN_Q8_0
-//            "TINY_EN_Q4_0" -> WhichModel.TINY_EN_Q4_0
-//            "BASE_Q8_0" -> WhichModel.BASE_Q8_0
-//            "BASE_Q4_0" -> WhichModel.BASE_Q4_0
-//
-//            // These k-quants are currently very slow and inaccurate
-//            "BASE_Q4K" -> WhichModel.BASE_Q4K
-//            "BASE_Q2K" -> WhichModel.BASE_Q2K
-//            else -> WhichModel.TINY_EN_Q4_0
-//        }
-//
-//        val isMultilingual = when (model) {
-//            WhichModel.TINY_EN_Q8_0 -> false
-//            WhichModel.TINY_EN_Q4_0 -> false
-//            WhichModel.BASE_Q8_0 -> true
-//            WhichModel.BASE_Q4_0 -> true
-//            WhichModel.BASE_Q4K -> true
-//            WhichModel.BASE_Q2K -> true
-//        }
-//
-//        println(model)
-//
-//        if (!isWhisperLoaded() || loadedModel != model) {
-//            val modelResId = when (model) {
-//                WhichModel.TINY_EN_Q8_0 -> R.raw.whisper_tiny_en_q8_0_model
-//                WhichModel.TINY_EN_Q4_0 -> R.raw.whisper_tiny_en_q4_0_model
-//                WhichModel.BASE_Q8_0 -> R.raw.whisper_base_q8_0_model
-//                WhichModel.BASE_Q4_0 -> R.raw.whisper_base_q4_0_model
-//                WhichModel.BASE_Q4K -> R.raw.whisper_base_q2k_model
-//                WhichModel.BASE_Q2K -> R.raw.whisper_base_q2k_model
-//            }
-//            val configResId = when (model) {
-//                WhichModel.TINY_EN_Q8_0 -> R.raw.whisper_tiny_en_config
-//                WhichModel.TINY_EN_Q4_0 -> R.raw.whisper_tiny_en_config
-//                WhichModel.BASE_Q8_0 -> R.raw.whisper_base_config
-//                WhichModel.BASE_Q4_0 -> R.raw.whisper_base_config
-//                WhichModel.BASE_Q4K -> R.raw.whisper_base_config
-//                WhichModel.BASE_Q2K -> R.raw.whisper_base_config
-//            }
-//            val tokenizerResId = when (model) {
-//                WhichModel.TINY_EN_Q8_0 -> R.raw.whisper_tiny_en_tokenizer
-//                WhichModel.TINY_EN_Q4_0 -> R.raw.whisper_tiny_en_tokenizer
-//                WhichModel.BASE_Q8_0 -> R.raw.whisper_base_tokenizer
-//                WhichModel.BASE_Q4_0 -> R.raw.whisper_base_tokenizer
-//                WhichModel.BASE_Q4K -> R.raw.whisper_base_tokenizer
-//                WhichModel.BASE_Q2K -> R.raw.whisper_base_tokenizer
-//            }
-//
-//            println(recognizerIntent?.extras?.getString(RecognizerIntent.EXTRA_LANGUAGE_MODEL))
-//
-//            val modelFileDescriptor = resources.openRawResourceFd(modelResId)
-//            val configFileDescriptor = resources.openRawResourceFd(configResId)
-//            val tokenizerFileDescriptor = resources.openRawResourceFd(tokenizerResId)
-//
-//            loadWhisper(
-//                modelFileDescriptor.parcelFileDescriptor.detachFd(),
-//                modelFileDescriptor.startOffset.toULong(),
-//                modelFileDescriptor.length.toULong(),
-//
-//                configFileDescriptor.parcelFileDescriptor.detachFd(),
-//                configFileDescriptor.startOffset.toULong(),
-//                configFileDescriptor.length.toULong(),
-//
-//                tokenizerFileDescriptor.parcelFileDescriptor.detachFd(),
-//                tokenizerFileDescriptor.startOffset.toULong(),
-//                tokenizerFileDescriptor.length.toULong(),
-//            )
-//
-//            modelFileDescriptor.close()
-//            configFileDescriptor.close()
-//            tokenizerFileDescriptor.close()
-//
-//            loadedModel = model
-//
-//            println("loaded model")
-//        }
-
-
         var totalTranscriptionTime = 0L
 
         recordAndTranscribeJob = recordAndTranscribeScope.launch recordAndTranscribe@{
@@ -272,7 +194,9 @@ class MainRecognitionService : RecognitionService() {
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
             val audioRmsScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1))
             transcribeJobs.clear()
-            val transcriptions = mutableMapOf<Int, Transcription>()
+            // Written by both the record loop (creating segments) and the VAD scope — a plain
+            // HashMap races on structural modification; ConcurrentHashMap is safe for that.
+            val transcriptions = java.util.concurrent.ConcurrentHashMap<Int, Transcription>()
             var transcriptionIndex by mutableIntStateOf(0)
 
             listener?.readyForSpeech(Bundle())
@@ -282,13 +206,18 @@ class MainRecognitionService : RecognitionService() {
 
                 val numberOfShorts = audioRecord.read(buffer, 0, bufferSize)
 
-                for (i in 0 until numberOfShorts) {
-                    if (transcriptions[transcriptionIndex] == null) {
-                        transcriptions[transcriptionIndex] = Transcription(start = null, end = null, text = null)
+                if (numberOfShorts > 0) {
+                    val seg = transcriptions.computeIfAbsent(transcriptionIndex) {
+                        Transcription(start = null, end = null, text = null)
                     }
-                    val seg = transcriptions[transcriptionIndex]!!
-                    if (seg.audioData.size < MAX_SEGMENT_SAMPLES) {
-                        seg.audioData.add(buffer[i])
+                    // Lock the segment's buffer: the record loop appends here while a transcribe
+                    // job may be slicing/clearing the same list — concurrent access corrupts it.
+                    synchronized(seg.audioData) {
+                        var i = 0
+                        while (i < numberOfShorts && seg.audioData.size < MAX_SEGMENT_SAMPLES) {
+                            seg.audioData.add(buffer[i])
+                            i++
+                        }
                     }
                 }
 
@@ -328,14 +257,16 @@ class MainRecognitionService : RecognitionService() {
                         val transcribeJob = transcribeScope.launch {
                             val timeBeforeTranscription = currentTimeMillis()
 
+                            val samples = synchronized(transcription.audioData) {
+                                transcription.audioData.slice(
+                                    ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(0))..
+                                        ((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
+                                ).toShortArray()
+                            }
+
                             val transcriptionText =
                                 whisperRepository.transcribeAudio(
-                                    transcription.audioData.slice(
-                                        ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(
-                                            0
-                                        ))..((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
-                                    )
-                                        .toShortArray(),
+                                    samples,
                                     groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
                                 )
 
@@ -349,7 +280,7 @@ class MainRecognitionService : RecognitionService() {
                                 }
                             }
 
-                            transcription.audioData.clear()
+                            synchronized(transcription.audioData) { transcription.audioData.clear() }
 
                             if (isPartialResults == true) {
                                 val bundle = Bundle().apply {
@@ -403,14 +334,16 @@ class MainRecognitionService : RecognitionService() {
                                         val transcribeJob = transcribeScope.launch {
                                             val timeBeforeTranscription = currentTimeMillis()
 
+                                            val samples = synchronized(transcription.audioData) {
+                                                transcription.audioData.slice(
+                                                    ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(0))..
+                                                        ((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
+                                                ).toShortArray()
+                                            }
+
                                             transcription.text =
                                                 whisperRepository.transcribeAudio(
-                                                    transcription.audioData.slice(
-                                                        ((transcription.start!!.toInt() - speechStartPadMs).coerceAtLeast(
-                                                            0
-                                                        ))..((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
-                                                    )
-                                                        .toShortArray(),
+                                                    samples,
                                                     groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
                                                 )
 
@@ -422,7 +355,7 @@ class MainRecognitionService : RecognitionService() {
                                                 }
                                             }
 
-                                            transcription.audioData.clear()
+                                            synchronized(transcription.audioData) { transcription.audioData.clear() }
 
                                             if (isPartialResults == true) {
                                                 val bundle = Bundle().apply {

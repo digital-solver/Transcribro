@@ -77,6 +77,8 @@ class MainRecognitionService : RecognitionService() {
     // ASR routing config, read from DataStore when recognition starts.
     private var groqApiKey: String = ""
     private var useOnlineAsr: Boolean = true
+    // Spoken language for the online (Groq) path; the on-device model is English-only.
+    private var inputLanguage: String = "en"
 
     private val whisperRepository: WhisperRepository =
         WhisperRepository(
@@ -188,6 +190,7 @@ class MainRecognitionService : RecognitionService() {
             val defaults = PreferencesUiState()
             groqApiKey = prefs[stringPreferencesKey("GROQ_API_KEY")] ?: defaults.groqApiKey.second.value
             useOnlineAsr = prefs[booleanPreferencesKey("USE_ONLINE_ASR")] ?: defaults.useOnlineAsr.second.value
+            inputLanguage = prefs[stringPreferencesKey("INPUT_LANGUAGE")] ?: defaults.inputLanguage.second.value
 
             // Single-threaded: VAD detection + segment bookkeeping run once per audio buffer and
             // mutate shared state; running them concurrently races and loses segments.
@@ -268,6 +271,7 @@ class MainRecognitionService : RecognitionService() {
                                 whisperRepository.transcribeAudio(
                                     samples,
                                     groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
+                                    inputLanguage,
                                 )
 
                             transcription.text = transcriptionText
@@ -345,6 +349,7 @@ class MainRecognitionService : RecognitionService() {
                                                 whisperRepository.transcribeAudio(
                                                     samples,
                                                     groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
+                                                    inputLanguage,
                                                 )
 
                                             totalTranscriptionTime += currentTimeMillis() - timeBeforeTranscription

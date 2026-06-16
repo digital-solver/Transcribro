@@ -52,5 +52,8 @@
     <string name="translation_language_setting_description">Speak English, get this language when translation is on. Currently: %1$s</string>
     <string name="translation_language_dialog_title">Translation language</string>
     <string name="translation_language_search_hint">Search languages</string>
+    <string name="input_language_setting_name">Spoken language (online)</string>
+    <string name="input_language_setting_description">The language you speak, for online recognition. Applies to online (Groq) recognition only — the offline model is English-only. Currently: %1$s</string>
+    <string name="input_language_dialog_title">Spoken language</string>
     <string name="cancel">Cancel</string>
 </resources>

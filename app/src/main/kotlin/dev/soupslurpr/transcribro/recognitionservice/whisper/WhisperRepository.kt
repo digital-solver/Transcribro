@@ -22,7 +22,7 @@ class WhisperRepository(
      * Transcribe a speech segment. If [groqApiKey] is non-blank, use online Groq Whisper
      * (large-v3-turbo); otherwise (or if the online call fails) fall back to on-device whisper.cpp.
      */
-    suspend fun transcribeAudio(data: ShortArray, groqApiKey: String? = null): String {
+    suspend fun transcribeAudio(data: ShortArray, groqApiKey: String? = null, language: String = "en"): String {
         // assume we only have one channel
         val samples = FloatArray(data.size) { index ->
             (data[index] / 32767.0f).coerceIn(-1f..1f)
@@ -38,7 +38,7 @@ class WhisperRepository(
         if (!groqApiKey.isNullOrBlank()) {
             try {
                 // Groq wants the real (un-padded) audio.
-                return GroqTranscriber.transcribe(samples, 16000, groqApiKey, "en").removeSuffix(" .")
+                return GroqTranscriber.transcribe(samples, 16000, groqApiKey, language).removeSuffix(" .")
             } catch (_: Exception) {
                 // network/online failure → fall through to on-device
             }

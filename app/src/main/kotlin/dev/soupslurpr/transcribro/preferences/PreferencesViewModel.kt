@@ -130,6 +130,13 @@ class PreferencesViewModel(private val dataStore: DataStore<Preferences>) : View
                             preferences[uiState.value.tone.first]
                                 ?: uiState.value.tone.second.value
                         )
+                    ),
+                    inputLanguage = Pair(
+                        uiState.value.inputLanguage.first,
+                        mutableStateOf(
+                            preferences[uiState.value.inputLanguage.first]
+                                ?: uiState.value.inputLanguage.second.value
+                        )
                     )
                 )
             }

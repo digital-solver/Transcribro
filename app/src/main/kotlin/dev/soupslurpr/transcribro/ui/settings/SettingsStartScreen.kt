@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
@@ -170,6 +171,17 @@ fun SettingsStartScreen(
                     preferencesViewModel.setPreference(preference.first, it)
                 },
                 isSecret = true,
+            )
+        }
+        item {
+            SettingsInputLanguageItem(
+                currentCode = preferencesUiState.inputLanguage.second.value,
+                onPick = { code ->
+                    preferencesUiState.inputLanguage.second.value = code
+                    preferencesViewModel.setPreference(
+                        preferencesUiState.inputLanguage.first, code
+                    )
+                }
             )
         }
         item {
@@ -350,17 +362,49 @@ fun SettingsTranslationLanguageItem(
 }
 
 @Composable
+fun SettingsInputLanguageItem(
+    currentCode: String,
+    onPick: (String) -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    val current = Languages.byCode(currentCode)
+    val currentLabel = current?.let { "${it.englishName} (${it.nativeName})" } ?: currentCode
+
+    SettingsIconItem(
+        name = stringResource(R.string.input_language_setting_name),
+        description = stringResource(R.string.input_language_setting_description, currentLabel),
+        icon = Icons.Filled.RecordVoiceOver,
+        onClick = { showDialog = true }
+    )
+
+    if (showDialog) {
+        LanguagePickerDialog(
+            currentCode = currentCode,
+            languages = Languages.inputAll,
+            title = stringResource(R.string.input_language_dialog_title),
+            onPick = {
+                onPick(it)
+                showDialog = false
+            },
+            onDismiss = { showDialog = false }
+        )
+    }
+}
+
+@Composable
 fun LanguagePickerDialog(
     currentCode: String,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
+    languages: List<Languages.Language> = Languages.all,
+    title: String = stringResource(R.string.translation_language_dialog_title),
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = remember(query) {
         if (query.isBlank()) {
-            Languages.all
+            languages
         } else {
-            Languages.all.filter {
+            languages.filter {
                 it.englishName.contains(query, ignoreCase = true) ||
                     it.nativeName.contains(query, ignoreCase = true) ||
                     it.code.contains(query, ignoreCase = true)
@@ -369,7 +413,7 @@ fun LanguagePickerDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.translation_language_dialog_title)) },
+        title = { Text(title) },
         text = {
             Column {
                 OutlinedTextField(

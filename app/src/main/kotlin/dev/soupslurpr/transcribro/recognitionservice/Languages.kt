@@ -63,7 +63,11 @@ object Languages {
         Language("si", "Sinhala", "සිංහල"),
     )
 
-    private val byCode: Map<String, Language> = all.associateBy { it.code }
+    /** Spoken/input languages for online ASR: English (the default + the on-device language) plus
+     *  every translation language, since Groq Whisper handles them too. */
+    val inputAll: List<Language> = listOf(Language("en", "English", "English")) + all
+
+    private val byCode: Map<String, Language> = inputAll.associateBy { it.code }
 
     const val DEFAULT_CODE = "th"
 

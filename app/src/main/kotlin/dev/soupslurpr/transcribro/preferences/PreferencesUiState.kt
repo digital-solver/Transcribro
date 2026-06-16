@@ -87,5 +87,12 @@ data class PreferencesUiState(
     val tone: Pair<Preferences.Key<String>, MutableState<String>> = Pair(
         (stringPreferencesKey("TONE")),
         mutableStateOf("Normal")
+    ),
+
+    /** Spoken/input language code for online (Groq) recognition (see Languages). Only affects the
+     *  online path; the on-device model is English-only. "en" by default. */
+    val inputLanguage: Pair<Preferences.Key<String>, MutableState<String>> = Pair(
+        (stringPreferencesKey("INPUT_LANGUAGE")),
+        mutableStateOf("en")
     )
 )

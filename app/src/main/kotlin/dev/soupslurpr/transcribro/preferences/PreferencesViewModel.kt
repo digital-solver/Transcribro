@@ -81,6 +81,55 @@ class PreferencesViewModel(private val dataStore: DataStore<Preferences>) : View
                                 .first] ?: uiState.value
                                 .autoSendTranscription.second.value
                         )
+                    ),
+                    groqApiKey = Pair(
+                        uiState.value.groqApiKey.first,
+                        mutableStateOf(
+                            preferences[uiState.value.groqApiKey.first]
+                                ?: uiState.value.groqApiKey.second.value
+                        )
+                    ),
+                    useOnlineAsr = Pair(
+                        uiState.value.useOnlineAsr.first,
+                        mutableStateOf(
+                            preferences[uiState.value.useOnlineAsr.first]
+                                ?: uiState.value.useOnlineAsr.second.value
+                        )
+                    ),
+                    modelDownloaded = Pair(
+                        uiState.value.modelDownloaded.first,
+                        mutableStateOf(
+                            preferences[uiState.value.modelDownloaded.first]
+                                ?: uiState.value.modelDownloaded.second.value
+                        )
+                    ),
+                    geminiApiKey = Pair(
+                        uiState.value.geminiApiKey.first,
+                        mutableStateOf(
+                            preferences[uiState.value.geminiApiKey.first]
+                                ?: uiState.value.geminiApiKey.second.value
+                        )
+                    ),
+                    translateEnabled = Pair(
+                        uiState.value.translateEnabled.first,
+                        mutableStateOf(
+                            preferences[uiState.value.translateEnabled.first]
+                                ?: uiState.value.translateEnabled.second.value
+                        )
+                    ),
+                    targetLanguage = Pair(
+                        uiState.value.targetLanguage.first,
+                        mutableStateOf(
+                            preferences[uiState.value.targetLanguage.first]
+                                ?: uiState.value.targetLanguage.second.value
+                        )
+                    ),
+                    tone = Pair(
+                        uiState.value.tone.first,
+                        mutableStateOf(
+                            preferences[uiState.value.tone.first]
+                                ?: uiState.value.tone.second.value
+                        )
                     )
                 )
             }
@@ -91,6 +140,15 @@ class PreferencesViewModel(private val dataStore: DataStore<Preferences>) : View
      * Set a preference to a value and save to Preferences DataStore
      */
     fun setPreference(key: Preferences.Key<Boolean>, value: Boolean) {
+        viewModelScope.launch {
+            dataStore.edit { preferences ->
+                preferences[key] = value
+            }
+        }
+    }
+
+    /** String preference overload (API keys, target language, tone). */
+    fun setPreference(key: Preferences.Key<String>, value: String) {
         viewModelScope.launch {
             dataStore.edit { preferences ->
                 preferences[key] = value

@@ -43,6 +43,16 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import dev.soupslurpr.transcribro.R
 import dev.soupslurpr.transcribro.ui.reusablecomposables.ScreenLazyColumn
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.soupslurpr.transcribro.dataStore
+import dev.soupslurpr.transcribro.model.ModelDownloader
+import dev.soupslurpr.transcribro.preferences.PreferencesViewModel
+import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import kotlin.random.Random
 
@@ -50,6 +60,11 @@ import kotlin.random.Random
 @Composable
 fun StartScreen() {
     val context = LocalContext.current
+
+    val preferencesViewModel: PreferencesViewModel = viewModel(
+        factory = PreferencesViewModel.PreferencesViewModelFactory(context.dataStore)
+    )
+    val preferencesUiState by preferencesViewModel.uiState.collectAsState()
 
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -156,7 +171,7 @@ fun StartScreen() {
                     Column(
                         Modifier.padding(16.dp)
                     ) {
-                        Text("If you want to use the Transcribro Voice Input keyboard, please turn it on in system settings.")
+                        Text("To use the Voice Translate keyboard, turn it on in system settings.")
                         Spacer(Modifier.padding(8.dp))
                         FilledTonalButton(
                             onClick = {
@@ -172,16 +187,26 @@ fun StartScreen() {
             }
         }
         item {
+            ModelDownloadCard(
+                modelDownloaded = preferencesUiState.modelDownloaded.second.value,
+                onDownloaded = {
+                    preferencesUiState.modelDownloaded.second.value = true
+                    preferencesViewModel.setPreference(
+                        preferencesUiState.modelDownloaded.first,
+                        true
+                    )
+                }
+            )
+        }
+        item {
             ElevatedCard {
                 Column(
                     Modifier.padding(16.dp)
                 ) {
                     Text(
-                        "If you want other apps that use the user-selected voice input app to use Transcribro," +
-                                " you need to grant Transcribro Microphone access " +
-                                "(make sure to select \"While using the app\" or it won't work properly), and then select " +
-                                "Transcribro Speech Recognition Service as the voice input app in settings." +
-                                " Go to System > Languages > Voice input, and then make sure Transcribro Speech Recognition Service is selected as the voice input app.",
+                        "Grant microphone access so the keyboard can hear you — choose " +
+                                "\"While using the app\". That, plus enabling the keyboard above, is all the " +
+                                "keyboard itself needs.",
                     )
                     Spacer(Modifier.padding(8.dp))
                     FilledTonalButton(
@@ -190,21 +215,31 @@ fun StartScreen() {
                             microphonePermissionState.launchPermissionRequest()
                         }
                     ) {
-                        Text("Grant microphone permission (make sure to select \"While using the app\")")
+                        Text(
+                            if (microphonePermissionState.status.isGranted) {
+                                "Microphone permission granted"
+                            } else {
+                                "Grant microphone permission (select \"While using the app\")"
+                            }
+                        )
                     }
+                    Spacer(Modifier.padding(8.dp))
+                    Text(
+                        "Optional: to let OTHER apps' own mic buttons use this engine, also select it as your " +
+                                "system voice input app (Settings → System → Languages & input → Voice input; the " +
+                                "exact path varies by phone). This is not needed for the keyboard.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Spacer(Modifier.padding(4.dp))
                     FilledTonalButton(
-                        enabled = microphonePermissionState.status.isGranted,
                         onClick = {
                             val intent = Intent(Settings.ACTION_SETTINGS)
                             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                             context.startActivity(intent)
                         }
                     ) {
-                        Text("Open settings (Navigate to System > Language & region > Speech > Voice input)")
+                        Text("Open system settings (optional)")
                     }
-                    Spacer(Modifier.padding(8.dp))
-                    Text("If you already selected Transcribro as the voice input app, please ignore this.")
                 }
             }
         }
@@ -225,4 +260,56 @@ fun isMyInputMethodEnabled(context: Context): Boolean {
     }
 
     return false
+}
+
+@Composable
+fun ModelDownloadCard(
+    modelDownloaded: Boolean,
+    onDownloaded: () -> Unit,
+) {
+    if (modelDownloaded) return
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var downloading by remember { mutableStateOf(false) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    ElevatedCard {
+        Column(Modifier.padding(16.dp)) {
+            Text(stringResource(R.string.download_model_setting_description))
+            Spacer(Modifier.padding(8.dp))
+            if (downloading) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                FilledTonalButton(
+                    onClick = {
+                        downloading = true
+                        error = null
+                        scope.launch {
+                            try {
+                                ModelDownloader.ensureModel(context) { downloaded, total ->
+                                    if (total > 0) progress = downloaded.toFloat() / total.toFloat()
+                                }
+                                onDownloaded()
+                            } catch (e: Exception) {
+                                error = e.message ?: "download failed"
+                            } finally {
+                                downloading = false
+                            }
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.download_model_setting_name))
+                }
+            }
+            if (error != null) {
+                Spacer(Modifier.padding(4.dp))
+                Text("Download failed: $error")
+            }
+        }
+    }
 }

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Transcribro</string>
+    <string name="app_name">Voice Translate</string>
     <string name="settings">Settings</string>
     <string name="welcome">Welcome to Transcribro!</string>
     <string name="welcome_april_fools">Welcome to Transcribruh!</string>
@@ -36,4 +36,21 @@
     <string name="auto_start_recognition_setting_description">Automatically start recognition when switching from another input method</string>
     <string name="auto_send_transcription_setting_name">Auto-Send Transcription</string>
     <string name="auto_send_transcription_setting_description">Automatically send transcription when speech stops being detected</string>
+
+    <!-- Voice + translate keyboard additions -->
+    <string name="speech_recognition_setting_category">Speech recognition &amp; translation</string>
+    <string name="use_online_asr_setting_name">Use online recognition (Groq)</string>
+    <string name="use_online_asr_setting_description">When a Groq key is set and you\'re online, transcribe with Whisper large-v3-turbo on Groq (more accurate); otherwise use the on-device model</string>
+    <string name="groq_api_key_setting_name">Groq API key</string>
+    <string name="groq_api_key_setting_description">Free key from console.groq.com for online speech recognition</string>
+    <string name="gemini_api_key_setting_name">Gemini API key</string>
+    <string name="gemini_api_key_setting_description">Free key from Google AI Studio for online translation</string>
+    <string name="downloading_model">Downloading model</string>
+    <string name="download_model_setting_name">Download on-device model</string>
+    <string name="download_model_setting_description">Download the offline speech model (~250 MB) so recognition works without internet</string>
+    <string name="translation_language_setting_name">Translation language</string>
+    <string name="translation_language_setting_description">Speak English, get this language when translation is on. Currently: %1$s</string>
+    <string name="translation_language_dialog_title">Translation language</string>
+    <string name="translation_language_search_hint">Search languages</string>
+    <string name="cancel">Cancel</string>
 </resources>

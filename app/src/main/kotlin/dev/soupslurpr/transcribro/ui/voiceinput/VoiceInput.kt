@@ -91,6 +91,8 @@ import dev.soupslurpr.transcribro.R
 import dev.soupslurpr.transcribro.dataStore
 import dev.soupslurpr.transcribro.preferences.PreferencesViewModel
 import dev.soupslurpr.transcribro.recognitionservice.MainRecognitionService
+import dev.soupslurpr.transcribro.recognitionservice.GeminiTranslator
+import dev.soupslurpr.transcribro.recognitionservice.Languages
 import dev.soupslurpr.transcribro.ui.reusablecomposables.ScreenLazyColumn
 import dev.soupslurpr.transcribro.ui.reusablecomposables.longPressableKey
 import dev.soupslurpr.transcribro.ui.theme.TranscribroTheme
@@ -310,6 +312,48 @@ class VoiceInput : InputMethodService() {
                                                             )?.get(0) ?: ""
 
                                                             if (transcription.isNotEmpty()) {
+                                                                // Translation mode: translate the segment, then commit
+                                                                // (online Gemini; on-device TranslateGemma offline, B6).
+                                                                val translateEnabled =
+                                                                    preferencesUiState.translateEnabled.second.value
+                                                                val targetLanguage =
+                                                                    preferencesUiState.targetLanguage.second.value
+                                                                if (translateEnabled) {
+                                                                    val geminiKey =
+                                                                        preferencesUiState.geminiApiKey.second.value
+                                                                    val toneValue =
+                                                                        preferencesUiState.tone.second.value
+                                                                    val before = ic.getTextBeforeCursor(1, 0)
+                                                                    val needsLeadingSpace =
+                                                                        !(before == "" || before == "\n" || before == " ")
+                                                                    val autoSend =
+                                                                        preferencesUiState.autoSendTranscription.second.value
+                                                                    snackbarCoroutine.launch {
+                                                                        val trimmed = transcription.trim()
+                                                                        // Online Gemini translation; if it fails
+                                                                        // or there's no key, commit raw English.
+                                                                        val translated = run {
+                                                                            if (geminiKey.isNotBlank()) {
+                                                                                try {
+                                                                                    return@run GeminiTranslator.translate(
+                                                                                        trimmed, targetLanguage, toneValue, geminiKey
+                                                                                    )
+                                                                                } catch (_: Exception) {
+                                                                                }
+                                                                            }
+                                                                            trimmed
+                                                                        }
+                                                                        ic.commitText(
+                                                                            (if (needsLeadingSpace) " " else "") + translated,
+                                                                            1
+                                                                        )
+                                                                        if (autoSend) {
+                                                                            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+                                                                        }
+                                                                    }
+                                                                    return@also
+                                                                }
+
                                                                 var textToCommit = if ((ic.getTextBeforeCursor(
                                                                         2,
                                                                         0
@@ -532,6 +576,49 @@ class VoiceInput : InputMethodService() {
                                                 ) {
                                                     Text(
                                                         "Cancel Recognition"
+                                                    )
+                                                }
+                                            }
+                                            // Tone + target-language control row.
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(bottom = 6.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                val tone = preferencesUiState.tone.second.value
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        val next = if (tone == "Casual") "Normal" else "Casual"
+                                                        preferencesUiState.tone.second.value = next
+                                                        preferencesViewModel.setPreference(
+                                                            preferencesUiState.tone.first, next
+                                                        )
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    shape = RoundedCornerShape(10.dp)
+                                                ) {
+                                                    Text("Tone: $tone")
+                                                }
+                                                val translateOn = preferencesUiState.translateEnabled.second.value
+                                                val targetLang = preferencesUiState.targetLanguage.second.value
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        val next = !translateOn
+                                                        preferencesUiState.translateEnabled.second.value = next
+                                                        preferencesViewModel.setPreference(
+                                                            preferencesUiState.translateEnabled.first, next
+                                                        )
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    shape = RoundedCornerShape(10.dp)
+                                                ) {
+                                                    Text(
+                                                        if (translateOn) {
+                                                            "→ ${Languages.shortLabel(targetLang)}"
+                                                        } else {
+                                                            "Translate: off"
+                                                        }
                                                     )
                                                 }
                                             }

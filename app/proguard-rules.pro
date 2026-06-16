@@ -26,3 +26,5 @@
 #-dontwarn java.awt.HeadlessException
 #-dontwarn java.awt.Window
 -keep class ai.onnxruntime.** { *; }
+# Whisper.cpp JNI bridge — keep (native methods + classes referenced from JNI).
+-keep class com.whispercpp.** { *; }

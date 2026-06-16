@@ -22,6 +22,12 @@ import dev.soupslurpr.transcribro.recognitionservice.silerovad.SileroVadReposito
 import dev.soupslurpr.transcribro.recognitionservice.whisper.WhisperApi
 import dev.soupslurpr.transcribro.recognitionservice.whisper.WhisperLocalDataSource
 import dev.soupslurpr.transcribro.recognitionservice.whisper.WhisperRepository
+import dev.soupslurpr.transcribro.dataStore
+import dev.soupslurpr.transcribro.model.ModelDownloader
+import dev.soupslurpr.transcribro.preferences.PreferencesUiState
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,15 +65,20 @@ class MainRecognitionService : RecognitionService() {
 
     private val transcribeJobs = mutableListOf<Job>()
 
+    // ASR routing config, read from DataStore when recognition starts.
+    private var groqApiKey: String = ""
+    private var useOnlineAsr: Boolean = true
+
     private val whisperRepository: WhisperRepository =
         WhisperRepository(
             WhisperLocalDataSource(
                 whisperApi =
                 object : WhisperApi {
                     override fun getWhisperContext(): WhisperContext {
-                        return WhisperContext.createContextFromAsset(
-                            application.assets,
-                            "models/whisper/ggml-model-whisper-tiny.en-q8_0.bin"
+                        // On-device model is downloaded to internal storage (ModelDownloader / first-run
+                        // download card), not bundled in the APK.
+                        return WhisperContext.createContextFromFile(
+                            ModelDownloader.modelFile(application).absolutePath
                         )
                     }
                 },
@@ -242,6 +253,12 @@ class MainRecognitionService : RecognitionService() {
             isSpeaking = false
             stopListening = false
 
+            // Decide ASR engine for this session: online Groq when enabled + key set, else on-device.
+            val prefs = application.dataStore.data.first()
+            val defaults = PreferencesUiState()
+            groqApiKey = prefs[stringPreferencesKey("GROQ_API_KEY")] ?: defaults.groqApiKey.second.value
+            useOnlineAsr = prefs[booleanPreferencesKey("USE_ONLINE_ASR")] ?: defaults.useOnlineAsr.second.value
+
             val audioRmsScope = CoroutineScope(Dispatchers.IO)
             transcribeJobs.clear()
             val transcriptions = mutableMapOf<Int, Transcription>()
@@ -305,6 +322,7 @@ class MainRecognitionService : RecognitionService() {
                                         ))..((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
                                     )
                                         .toShortArray(),
+                                    groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
                                 )
 
                             transcription.text = transcriptionText
@@ -379,6 +397,7 @@ class MainRecognitionService : RecognitionService() {
                                                         ))..((transcription.end!!.toInt()).coerceAtMost(transcription.audioData.size - 1))
                                                     )
                                                         .toShortArray(),
+                                                    groqApiKey.takeIf { useOnlineAsr && it.isNotBlank() },
                                                 )
 
                                             totalTranscriptionTime += currentTimeMillis() - timeBeforeTranscription

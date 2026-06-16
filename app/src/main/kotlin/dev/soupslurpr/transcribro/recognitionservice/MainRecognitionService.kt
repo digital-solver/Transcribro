@@ -63,7 +63,10 @@ class MainRecognitionService : RecognitionService() {
 
     private var stopListening by mutableStateOf(false)
 
-    private val transcribeJobs = mutableListOf<Job>()
+    // Added to + iterated across coroutines. A plain list throws ConcurrentModificationException,
+    // which kills the transcribe coroutine and drops every segment after the first — use a
+    // copy-on-write list so concurrent iteration is safe.
+    private val transcribeJobs = java.util.concurrent.CopyOnWriteArrayList<Job>()
 
     // ASR routing config, read from DataStore when recognition starts.
     private var groqApiKey: String = ""
@@ -259,7 +262,10 @@ class MainRecognitionService : RecognitionService() {
             groqApiKey = prefs[stringPreferencesKey("GROQ_API_KEY")] ?: defaults.groqApiKey.second.value
             useOnlineAsr = prefs[booleanPreferencesKey("USE_ONLINE_ASR")] ?: defaults.useOnlineAsr.second.value
 
-            val audioRmsScope = CoroutineScope(Dispatchers.IO)
+            // Single-threaded: VAD detection + segment bookkeeping run once per audio buffer and
+            // mutate shared state; running them concurrently races and loses segments.
+            @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+            val audioRmsScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1))
             transcribeJobs.clear()
             val transcriptions = mutableMapOf<Int, Transcription>()
             var transcriptionIndex by mutableIntStateOf(0)
